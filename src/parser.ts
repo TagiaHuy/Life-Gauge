@@ -1,0 +1,113 @@
+import { Stat } from "./data";
+
+export interface TaskReward {
+    statId: string;
+    amount: number;
+}
+
+export interface LifeGaugeTask {
+    originalLine: number;
+    text: string;
+    completed: boolean;
+    rewards: TaskReward[];
+    skills: string[];
+    date?: string;
+    time?: string;
+    isArchived: boolean;
+}
+
+export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
+    const lines = content.split('\n');
+    const tasks: LifeGaugeTask[] = [];
+    
+    // Regex components
+    const taskRegex = /^\s*-\s*\[([ x])\]\s*(.+?)\s*$/;
+    const rewardSectionRegex = /\(([^)]+)\)/;
+    const rewardRegex = /\+([0-9]+)\s+([a-zA-Z]+)/g;
+    const dateRegex = /@\{([^}]+)\}/;
+    const timeRegex = /@@\{([^}]+)\}/;
+    const skillRegex = /#([a-zA-Z0-9\u00C0-\u1EF9-]+)/g; // Supports accented characters for Vietnamese
+
+    let isArchivedSection = false;
+
+    lines.forEach((line, index) => {
+        // Detect Archive section
+        if (line.trim().toLowerCase().startsWith('## archive')) {
+            isArchivedSection = true;
+            return;
+        }
+
+        const match = taskRegex.exec(line);
+        if (match) {
+            const completed = match[1] === 'x';
+            let remainingText = match[2];
+
+            // 1. Extract Rewards
+            const rewards: TaskReward[] = [];
+            const rewardMatch = rewardSectionRegex.exec(remainingText);
+            if (rewardMatch) {
+                const rewardsRaw = rewardMatch[1];
+                let rMatch;
+                while ((rMatch = rewardRegex.exec(rewardsRaw)) !== null) {
+                    const amount = parseInt(rMatch[1]);
+                    const statName = rMatch[2].toLowerCase();
+                    const stat = stats.find(s => s.name.toLowerCase() === statName || s.id.toLowerCase() === statName);
+                    if (stat) {
+                        rewards.push({ statId: stat.id, amount });
+                    }
+                }
+                remainingText = remainingText.replace(rewardSectionRegex, '').trim();
+            }
+
+            // 2. Extract Date
+            let date;
+            const dMatch = dateRegex.exec(remainingText);
+            if (dMatch) {
+                date = dMatch[1];
+                remainingText = remainingText.replace(dateRegex, '').trim();
+            }
+
+            // 3. Extract Time
+            let time;
+            const tMatch = timeRegex.exec(remainingText);
+            if (tMatch) {
+                time = tMatch[1];
+                remainingText = remainingText.replace(timeRegex, '').trim();
+            }
+
+            // 4. Extract Skill Hashtags
+            const skills: string[] = [];
+            let sMatch;
+            while ((sMatch = skillRegex.exec(remainingText)) !== null) {
+                skills.push(sMatch[1].toLowerCase());
+            }
+            remainingText = remainingText.replace(skillRegex, '').trim();
+
+            // Mandatory deadline check: Skip tasks that don't have a date or time
+            if (!date && !time) return;
+
+            // Store task
+            tasks.push({
+                originalLine: index,
+                text: remainingText,
+                completed: completed,
+                rewards: rewards,
+                skills: skills,
+                date: date,
+                time: time,
+                isArchived: isArchivedSection
+            });
+        }
+    });
+
+    return tasks;
+}
+
+export function updateTaskInContent(content: string, lineIndex: number, completed: boolean): string {
+    const lines = content.split('\n');
+    if (lineIndex >= 0 && lineIndex < lines.length) {
+        const char = completed ? 'x' : ' ';
+        lines[lineIndex] = lines[lineIndex].replace(/\[[ x]\]/, `[${char}]`);
+    }
+    return lines.join('\n');
+}

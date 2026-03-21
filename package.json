@@ -1,0 +1,22 @@
+{
+	"name": "life-gauge",
+	"version": "1.0.0",
+	"description": "Life Gauge plugin for Obsidian",
+	"main": "main.js",
+	"scripts": {
+		"dev": "node esbuild.config.mjs",
+		"build": "tsc -noEmit && node esbuild.config.mjs production",
+		"version": "node -e \"const fs=require('fs');const m=JSON.parse(fs.readFileSync('manifest.json','utf8'));const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version=m.version;fs.writeFileSync('package.json',JSON.stringify(p,null,2));\""
+	},
+	"keywords": [],
+	"author": "",
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^16.11.21",
+		"builtin-modules": "^5.0.0",
+		"esbuild": "0.17.11",
+		"obsidian": "latest",
+		"tslib": "2.4.0",
+		"typescript": "^4.5.5"
+	}
+}

@@ -1,0 +1,16 @@
+{
+	"compilerOptions": {
+		"baseUrl": ".",
+		"inlineSourceMap": true,
+		"inlineSources": true,
+		"module": "CommonJS",
+		"target": "ESNext",
+		"allowJs": true,
+		"allowSyntheticDefaultImports": true,
+		"skipLibCheck": true,
+		"lib": ["DOM", "ESNext"],
+		"strict": true,
+		"moduleResolution": "node"
+	},
+	"include": ["**/*.ts"]
+}

@@ -1,0 +1,329 @@
+.life-gauge-dashboard {
+    padding: 16px;
+    font-family: var(--font-interface);
+    background: var(--background-primary);
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    height: 100%;
+    overflow-y: auto;
+}
+
+/* Header */
+.lg-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--background-modifier-border);
+    position: relative;
+}
+
+.lg-avatar-container {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    overflow: hidden;
+    border: 2px solid var(--interactive-accent);
+    flex-shrink: 0;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.lg-avatar-container:hover {
+    transform: scale(1.05);
+}
+
+.lg-avatar {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.lg-info {
+    flex-grow: 1;
+}
+
+.lg-nickname {
+    font-size: 1.4em;
+    font-weight: bold;
+    color: var(--text-normal);
+    margin-bottom: 4px;
+    text-shadow: 0 0 10px rgba(var(--interactive-accent-rgb), 0.3);
+}
+
+.lg-description {
+    font-size: 0.9em;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+    font-style: italic;
+}
+
+.lg-next-rank {
+    font-size: 0.85em;
+    color: var(--interactive-accent);
+    font-weight: 500;
+}
+
+.lg-settings-icon {
+    position: absolute;
+    top: 0;
+    right: 0;
+    cursor: pointer;
+    font-size: 1.2em;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.lg-settings-icon:hover {
+    opacity: 1;
+}
+
+/* Stats */
+.lg-stats-container {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.lg-stat-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.lg-stat-icon {
+    font-size: 1.2em;
+    width: 24px;
+    text-align: center;
+}
+
+.lg-stat-label {
+    width: 80px;
+    font-weight: 600;
+    font-size: 0.9em;
+}
+
+.lg-bar-container {
+    flex-grow: 1;
+    height: 12px;
+    background: var(--background-modifier-border);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: inset 0 1px 3px rgba(0,0,0,0.2);
+    position: relative;
+}
+
+.lg-bar-fill {
+    height: 100%;
+    transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: 0 0 10px currentColor;
+    border-radius: 6px;
+}
+
+.lg-stat-value {
+    width: 70px;
+    font-size: 0.8em;
+    color: var(--text-muted);
+    text-align: right;
+}
+
+.lg-stat-level {
+    width: 40px;
+    font-weight: bold;
+    font-size: 0.9em;
+    color: var(--text-accent);
+}
+
+.lg-total-xp {
+    margin-top: 10px;
+    font-size: 0.9em;
+    color: var(--text-muted);
+    text-align: center;
+}
+
+/* Quests */
+.lg-quest-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.lg-section-title {
+    margin: 20px 0 10px 0;
+    font-size: 1.2em;
+    color: var(--text-accent);
+    border-bottom: 1px solid var(--background-modifier-border);
+    padding-bottom: 5px;
+}
+
+.lg-skills-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 16px;
+}
+
+.lg-skill-card {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    transition: transform 0.2s, border-color 0.2s;
+    position: relative;
+    overflow: hidden;
+}
+
+.lg-skill-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--interactive-accent);
+}
+
+.lg-skill-card .lg-stat-label {
+    width: 100%;
+    font-size: 1.1em;
+    margin-bottom: 4px;
+}
+
+.lg-skill-card .lg-bar-container {
+    height: 8px;
+}
+
+.lg-quest-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    font-size: 0.85em;
+    opacity: 0.8;
+}
+
+.lg-skill-tag {
+    color: #8e44ad;
+    font-weight: bold;
+}
+
+.lg-date-text {
+    color: var(--text-muted);
+}
+
+.lg-quest-title {
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
+.lg-refresh-btn {
+    cursor: pointer;
+    font-size: 1em;
+    opacity: 0.6;
+    transition: opacity 0.2s, transform 0.2s;
+}
+
+.lg-refresh-btn:hover {
+    opacity: 1;
+    transform: rotate(30deg);
+}
+
+.lg-quest-list {
+    background: var(--background-secondary);
+    border-radius: 8px;
+    padding: 12px;
+    border: 1px solid var(--background-modifier-border);
+}
+
+.lg-quest-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 8px 0;
+}
+
+.lg-quest-item:not(:last-child) {
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.lg-quest-checkbox {
+    margin-top: 4px;
+    cursor: pointer;
+}
+
+.lg-quest-content {
+    flex-grow: 1;
+}
+
+.lg-quest-text {
+    font-size: 0.95em;
+    line-height: 1.4;
+}
+
+.lg-quest-rewards {
+    font-size: 0.8em;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.lg-no-tasks {
+    color: var(--text-faint);
+    text-align: center;
+    padding: 20px;
+}
+
+/* Animations */
+@keyframes rank-up {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.1); }
+    100% { transform: scale(1); }
+}
+
+.lg-nickname-update {
+    animation: rank-up 0.5s ease-out;
+}
+
+/* Settings Collapsible Sections */
+.lg-settings-details {
+    margin-bottom: 20px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 10px;
+    background: var(--background-secondary-alt);
+}
+
+.lg-settings-details[open] {
+    border-color: var(--interactive-accent);
+}
+
+.lg-settings-details summary {
+    cursor: pointer;
+    outline: none;
+    list-style: none;
+}
+
+.lg-settings-details summary::-webkit-details-marker {
+    display: none;
+}
+
+.lg-settings-summary-title {
+    margin: 0;
+    display: inline-block;
+    color: var(--text-accent);
+    font-size: 1.1em;
+}
+
+.lg-settings-details summary:hover .lg-settings-summary-title {
+    color: var(--interactive-accent);
+}
+
+.lg-settings-details summary::before {
+    content: '▶';
+    display: inline-block;
+    margin-right: 10px;
+    transition: transform 0.2s;
+    color: var(--text-muted);
+}
+
+.lg-settings-details[open] summary::before {
+    transform: rotate(90deg);
+    color: var(--interactive-accent);
+}
