@@ -188,7 +188,10 @@ export class LifeGaugeView extends ItemView {
 
                 // Rewards
                 if (task.rewards.length > 0) {
-                    const rewardsText = task.rewards.map(r => `+${r.amount} ${r.statId}`).join(', ');
+                    const rewardsText = task.rewards.map(r => {
+                        const stat = this.plugin.settings.stats.find(s => s.id === r.statId);
+                        return `+${r.amount} ${stat ? stat.name : r.statId}`;
+                    }).join(', ');
                     meta.createEl('span', { text: `(${rewardsText})`, cls: 'lg-reward-text' });
                 }
 
@@ -255,10 +258,19 @@ export class LifeGaugeView extends ItemView {
                 }
             });
 
+            const rewardsList = task.rewards.map(r => {
+                const stat = this.plugin.settings.stats.find(s => s.id === r.statId);
+                const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
+                return `${finalAmount > 0 ? '+' : ''}${finalAmount} ${stat ? stat.name : r.statId}`;
+            }).join(', ');
+            const rewardMsg = rewardsList ? ` (${rewardsList})` : '';
+
             if (completed && penaltyInfo.isLate) {
                 const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
                 const statusMsg = penaltyInfo.multiplier < 0 ? `Bị trừ ${-Math.round(penaltyInfo.multiplier * 100)}% điểm` : `Giảm ${reductionPercent}% điểm`;
-                new Notice(`⚠️ Hoàn thành trễ: ${task.text}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
+                new Notice(`⚠️ Hoàn thành trễ: ${task.text}${rewardMsg}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
+            } else if (completed) {
+                new Notice(`✅ Nhiệm vụ hoàn thành: ${task.text}${rewardMsg}`);
             }
 
             if (completed) {

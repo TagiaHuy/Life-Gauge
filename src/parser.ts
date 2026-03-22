@@ -23,7 +23,7 @@ export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
     // Regex components
     const taskRegex = /^\s*-\s*\[([ x])\]\s*(.+?)\s*$/;
     const rewardSectionRegex = /\(([^)]+)\)/;
-    const rewardRegex = /\+([0-9]+)\s+([a-zA-Z]+)/g;
+    const rewardRegex = /\+([0-9]+)\s+([a-zA-Z0-9-]+)/g;
     const dateRegex = /@\{([^}]+)\}/;
     const timeRegex = /@@\{([^}]+)\}/;
     const skillRegex = /#([a-zA-Z0-9\u00C0-\u1EF9-]+)/g; // Supports accented characters for Vietnamese

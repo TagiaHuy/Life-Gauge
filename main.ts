@@ -66,10 +66,19 @@ export default class LifeGaugePlugin extends Plugin {
                     }
                 });
 
+                const rewardsList = task.rewards.map(r => {
+                    const stat = this.settings.stats.find(s => s.id === r.statId);
+                    const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
+                    return `${finalAmount > 0 ? '+' : ''}${finalAmount} ${stat ? stat.name : r.statId}`;
+                }).join(', ');
+                const rewardMsg = rewardsList ? ` (${rewardsList})` : '';
+
                 if (penaltyInfo.isLate) {
                     const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
                     const statusMsg = penaltyInfo.multiplier < 0 ? `Bị trừ ${-Math.round(penaltyInfo.multiplier * 100)}% điểm` : `Giảm ${reductionPercent}% điểm`;
-                    new Notice(`⚠️ Hoàn thành trễ: ${task.text}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
+                    new Notice(`⚠️ Hoàn thành trễ: ${task.text}${rewardMsg}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
+                } else {
+                    new Notice(`✅ Nhiệm vụ hoàn thành: ${task.text}${rewardMsg}`);
                 }
 
                 this.settings.completedTasks.push(taskId);
@@ -195,15 +204,6 @@ class LifeGaugeSettingTab extends PluginSettingTab {
                     await this.plugin.saveSettings();
                 }));
 
-        new Setting(containerEl)
-            .setName('Show Total XP')
-            .setDesc('Display total cumulative XP in the dashboard.')
-            .addToggle(toggle => toggle
-                .setValue(this.plugin.settings.showTotalXp)
-                .onChange(async (value) => {
-                    this.plugin.settings.showTotalXp = value;
-                    await this.plugin.saveSettings();
-                }));
 
         containerEl.createEl('h3', { text: '💀 Cấu hình hình phạt' });
         new Setting(containerEl)
@@ -363,7 +363,7 @@ class LifeGaugeSettingTab extends PluginSettingTab {
 
         const titlesDetails = containerEl.createEl('details', { cls: 'lg-settings-details' });
         const titlesSummary = titlesDetails.createEl('summary');
-        titlesSummary.createEl('h3', { text: '🏆 Cấu hình Danh hiệu (Titles)', cls: 'lg-settings-summary-title' });
+        titlesSummary.createEl('h3', { text: '🏆 Titles configuration', cls: 'lg-settings-summary-title' });
 
         this.plugin.settings.titles.forEach((title, index) => {
             const titleHeader = titlesDetails.createEl('div', { cls: 'lg-setting-stat-header' });

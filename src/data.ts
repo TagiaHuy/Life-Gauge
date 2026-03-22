@@ -25,7 +25,6 @@ export interface LifeGaugeSettings {
     skills: Stat[]; // Skills use the same structure as Stats (XP/Level)
     completedTasks: string[];
     penaltyPoint: number;
-    showTotalXp: boolean;
     refreshInterval: number;
 }
 
@@ -109,7 +108,6 @@ export const DEFAULT_SETTINGS: LifeGaugeSettings = {
     skills: [],
     completedTasks: [],
     penaltyPoint: 1,
-    showTotalXp: true,
     refreshInterval: 5
 };
 

@@ -114,7 +114,6 @@ var DEFAULT_SETTINGS = {
   skills: [],
   completedTasks: [],
   penaltyPoint: 1,
-  showTotalXp: true,
   refreshInterval: 5
 };
 function calculateLevel(currentXp, baseXp, xpIncrement) {
@@ -149,7 +148,7 @@ function parseTasks(content, stats) {
   const tasks = [];
   const taskRegex = /^\s*-\s*\[([ x])\]\s*(.+?)\s*$/;
   const rewardSectionRegex = /\(([^)]+)\)/;
-  const rewardRegex = /\+([0-9]+)\s+([a-zA-Z]+)/g;
+  const rewardRegex = /\+([0-9]+)\s+([a-zA-Z0-9-]+)/g;
   const dateRegex = /@\{([^}]+)\}/;
   const timeRegex = /@@\{([^}]+)\}/;
   const skillRegex = /#([a-zA-Z0-9\u00C0-\u1EF9-]+)/g;
@@ -353,7 +352,10 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       if (task.rewards.length > 0 || task.skills.length > 0 || task.date || task.time) {
         const meta = textContainer.createEl("div", { cls: "lg-quest-meta" });
         if (task.rewards.length > 0) {
-          const rewardsText = task.rewards.map((r) => `+${r.amount} ${r.statId}`).join(", ");
+          const rewardsText = task.rewards.map((r) => {
+            const stat = this.plugin.settings.stats.find((s) => s.id === r.statId);
+            return `+${r.amount} ${stat ? stat.name : r.statId}`;
+          }).join(", ");
           meta.createEl("span", { text: `(${rewardsText})`, cls: "lg-reward-text" });
         }
         if (task.date || task.time) {
@@ -408,11 +410,19 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
           }
         }
       });
+      const rewardsList = task.rewards.map((r) => {
+        const stat = this.plugin.settings.stats.find((s) => s.id === r.statId);
+        const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
+        return `${finalAmount > 0 ? "+" : ""}${finalAmount} ${stat ? stat.name : r.statId}`;
+      }).join(", ");
+      const rewardMsg = rewardsList ? ` (${rewardsList})` : "";
       if (completed && penaltyInfo.isLate) {
         const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
         const statusMsg = penaltyInfo.multiplier < 0 ? `B\u1ECB tr\u1EEB ${-Math.round(penaltyInfo.multiplier * 100)}% \u0111i\u1EC3m` : `Gi\u1EA3m ${reductionPercent}% \u0111i\u1EC3m`;
-        new import_obsidian.Notice(`\u26A0\uFE0F Ho\xE0n th\xE0nh tr\u1EC5: ${task.text}
+        new import_obsidian.Notice(`\u26A0\uFE0F Ho\xE0n th\xE0nh tr\u1EC5: ${task.text}${rewardMsg}
 ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
+      } else if (completed) {
+        new import_obsidian.Notice(`\u2705 Nhi\u1EC7m v\u1EE5 ho\xE0n th\xE0nh: ${task.text}${rewardMsg}`);
       }
       if (completed) {
         if (!this.plugin.settings.completedTasks.includes(taskId)) {
@@ -491,11 +501,19 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
               skill.currentXp = 0;
           }
         });
+        const rewardsList = task.rewards.map((r) => {
+          const stat = this.settings.stats.find((s) => s.id === r.statId);
+          const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
+          return `${finalAmount > 0 ? "+" : ""}${finalAmount} ${stat ? stat.name : r.statId}`;
+        }).join(", ");
+        const rewardMsg = rewardsList ? ` (${rewardsList})` : "";
         if (penaltyInfo.isLate) {
           const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
           const statusMsg = penaltyInfo.multiplier < 0 ? `B\u1ECB tr\u1EEB ${-Math.round(penaltyInfo.multiplier * 100)}% \u0111i\u1EC3m` : `Gi\u1EA3m ${reductionPercent}% \u0111i\u1EC3m`;
-          new import_obsidian2.Notice(`\u26A0\uFE0F Ho\xE0n th\xE0nh tr\u1EC5: ${task.text}
+          new import_obsidian2.Notice(`\u26A0\uFE0F Ho\xE0n th\xE0nh tr\u1EC5: ${task.text}${rewardMsg}
 ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
+        } else {
+          new import_obsidian2.Notice(`\u2705 Nhi\u1EC7m v\u1EE5 ho\xE0n th\xE0nh: ${task.text}${rewardMsg}`);
         }
         this.settings.completedTasks.push(taskId);
         changed = true;
@@ -582,10 +600,6 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
     }));
     new import_obsidian2.Setting(containerEl).setName("Task File Path").setDesc("Path to the Markdown file containing your tasks.").addText((text) => text.setValue(this.plugin.settings.taskFilePath).onChange(async (value) => {
       this.plugin.settings.taskFilePath = value;
-      await this.plugin.saveSettings();
-    }));
-    new import_obsidian2.Setting(containerEl).setName("Show Total XP").setDesc("Display total cumulative XP in the dashboard.").addToggle((toggle) => toggle.setValue(this.plugin.settings.showTotalXp).onChange(async (value) => {
-      this.plugin.settings.showTotalXp = value;
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "\u{1F480} C\u1EA5u h\xECnh h\xECnh ph\u1EA1t" });
@@ -686,7 +700,7 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
     }));
     const titlesDetails = containerEl.createEl("details", { cls: "lg-settings-details" });
     const titlesSummary = titlesDetails.createEl("summary");
-    titlesSummary.createEl("h3", { text: "\u{1F3C6} C\u1EA5u h\xECnh Danh hi\u1EC7u (Titles)", cls: "lg-settings-summary-title" });
+    titlesSummary.createEl("h3", { text: "\u{1F3C6} Titles configuration", cls: "lg-settings-summary-title" });
     this.plugin.settings.titles.forEach((title, index) => {
       const titleHeader = titlesDetails.createEl("div", { cls: "lg-setting-stat-header" });
       titleHeader.style.display = "flex";
