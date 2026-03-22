@@ -532,62 +532,38 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
         return;
       const oldTasks = this.lastKnownContent ? parseTasks(this.lastKnownContent, this.settings.stats) : [];
       const newTasks = parseTasks(content, this.settings.stats);
-      const unprocessedOld = oldTasks.filter((t) => !t.isProcessed && t.completed);
-      const unprocessedNew = newTasks.filter((t) => !t.isProcessed && t.completed);
-      const oldCounts = /* @__PURE__ */ new Map();
-      unprocessedOld.forEach((t) => {
-        const key = getTaskKey(t);
-        oldCounts.set(key, (oldCounts.get(key) || 0) + 1);
-      });
-      const newCounts = /* @__PURE__ */ new Map();
-      unprocessedNew.forEach((t) => {
-        const key = getTaskKey(t);
-        newCounts.set(key, (newCounts.get(key) || 0) + 1);
-      });
-      const rewardedCounts = /* @__PURE__ */ new Map();
-      this.settings.completedTasks.forEach((key) => {
-        rewardedCounts.set(key, (rewardedCounts.get(key) || 0) + 1);
-      });
       const now = /* @__PURE__ */ new Date();
       let changed = false;
       let fileContentChanged = false;
       let currentContent = content;
-      const sessionChangedKeys = /* @__PURE__ */ new Set([...oldCounts.keys(), ...newCounts.keys()]);
-      for (const key of sessionChangedKeys) {
-        const nOld = oldCounts.get(key) || 0;
-        const nNew = newCounts.get(key) || 0;
-        const deltaSession = nNew - nOld;
-        if (deltaSession === 0)
-          continue;
-        const task = (deltaSession > 0 ? newTasks : oldTasks).find((t) => getTaskKey(t) === key && t.completed && !t.isProcessed);
-        if (!task)
-          continue;
-        const penaltyInfo = this.getPenaltyInfo(task, now);
-        for (let i = 0; i < Math.abs(deltaSession); i++) {
-          const nRewarded = rewardedCounts.get(key) || 0;
-          if (deltaSession > 0) {
-            if (nNew > nRewarded) {
-              this.applyReward(task, penaltyInfo);
-              this.settings.completedTasks.push(key);
-              rewardedCounts.set(key, nRewarded + 1);
-              this.showRewardNotice(task, penaltyInfo);
-              currentContent = updateTaskInContent(currentContent, task.originalLine, true, true);
-              fileContentChanged = true;
-            }
-          } else {
-            if (nRewarded > nNew) {
-              this.applyUnreward(task);
-              const idx = this.settings.completedTasks.indexOf(key);
-              if (idx > -1) {
-                this.settings.completedTasks.splice(idx, 1);
-                rewardedCounts.set(key, nRewarded - 1);
-              }
-            }
-          }
+      const newlyCompleted = newTasks.filter((t) => t.completed && !t.isProcessed);
+      for (const task of newlyCompleted) {
+        const key = getTaskKey(task);
+        if (!this.settings.completedTasks.includes(key)) {
+          const penaltyInfo = this.getPenaltyInfo(task, now);
+          this.applyReward(task, penaltyInfo);
+          this.settings.completedTasks.push(key);
+          this.showRewardNotice(task, penaltyInfo);
           changed = true;
         }
+        currentContent = updateTaskInContent(currentContent, task.originalLine, true, true);
+        fileContentChanged = true;
       }
-      if (fileContentChanged) {
+      const unprocessedOld = oldTasks.filter((t) => t.completed && !t.isProcessed);
+      for (const oldTask of unprocessedOld) {
+        const stillChecked = newTasks.some((nt) => nt.originalLine === oldTask.originalLine && nt.completed);
+        if (!stillChecked) {
+          const key = getTaskKey(oldTask);
+          if (this.settings.completedTasks.includes(key)) {
+            this.applyUnreward(oldTask);
+            const idx = this.settings.completedTasks.indexOf(key);
+            if (idx > -1)
+              this.settings.completedTasks.splice(idx, 1);
+            changed = true;
+          }
+        }
+      }
+      if (fileContentChanged && currentContent !== content) {
         this.isInternalChange = true;
         await this.app.vault.modify(file, currentContent);
         this.lastKnownContent = currentContent;
@@ -597,7 +573,7 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
       }
       if (changed) {
         await this.saveSettings();
-      } else {
+      } else if (fileContentChanged) {
         this.refreshViews();
       }
     } finally {
