@@ -15,13 +15,14 @@ export interface LifeGaugeTask {
     time?: string;
     isArchived: boolean;
     isProcessed: boolean;
+    occurrenceIndex: number;
 }
 export function getTaskKey(task: LifeGaugeTask): string {
     const rewardsKey = (task.rewards || [])
         .map(r => `${r.statId}${r.amount}`)
         .sort()
         .join(',');
-    return `${task.text}:${rewardsKey}:${task.date || ''}:${task.time || ''}`;
+    return `${task.text}:${rewardsKey}:${task.date || ''}:${task.time || ''}:${task.occurrenceIndex}`;
 }
 
 export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
@@ -37,6 +38,7 @@ export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
     const skillRegex = /#([a-zA-Z0-9\u00C0-\u1EF9-]+)/g; // Supports accented characters for Vietnamese
 
     let isArchivedSection = false;
+    const occurrenceMap = new Map<string, number>();
 
     lines.forEach((line, index) => {
         // Detect Archive section
@@ -95,6 +97,11 @@ export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
             // Mandatory deadline check: Skip tasks that don't have a date or time
             if (!date && !time) return;
 
+            // Calculate occurrence index for duplicate detection
+            const baseKey = `${remainingText}:${rewards.map(r => `${r.statId}${r.amount}`).sort().join(',')}:${date || ''}:${time || ''}`;
+            const occurrenceIndex = occurrenceMap.get(baseKey) || 0;
+            occurrenceMap.set(baseKey, occurrenceIndex + 1);
+
             // Store task
             tasks.push({
                 originalLine: index,
@@ -105,7 +112,8 @@ export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
                 date: date,
                 time: time,
                 isArchived: isArchivedSection,
-                isProcessed: isProcessed
+                isProcessed: isProcessed,
+                occurrenceIndex: occurrenceIndex
             });
         }
     });

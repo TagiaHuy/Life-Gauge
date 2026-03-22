@@ -145,7 +145,7 @@ var import_obsidian = require("obsidian");
 // src/parser.ts
 function getTaskKey(task) {
   const rewardsKey = (task.rewards || []).map((r) => `${r.statId}${r.amount}`).sort().join(",");
-  return `${task.text}:${rewardsKey}:${task.date || ""}:${task.time || ""}`;
+  return `${task.text}:${rewardsKey}:${task.date || ""}:${task.time || ""}:${task.occurrenceIndex}`;
 }
 function parseTasks(content, stats) {
   const lines = content.split("\n");
@@ -157,6 +157,7 @@ function parseTasks(content, stats) {
   const timeRegex = /@@\{([^}]+)\}/;
   const skillRegex = /#([a-zA-Z0-9\u00C0-\u1EF9-]+)/g;
   let isArchivedSection = false;
+  const occurrenceMap = /* @__PURE__ */ new Map();
   lines.forEach((line, index) => {
     if (line.trim().toLowerCase().startsWith("## archive")) {
       isArchivedSection = true;
@@ -202,6 +203,9 @@ function parseTasks(content, stats) {
       remainingText = remainingText.replace(skillRegex, "").trim();
       if (!date && !time)
         return;
+      const baseKey = `${remainingText}:${rewards.map((r) => `${r.statId}${r.amount}`).sort().join(",")}:${date || ""}:${time || ""}`;
+      const occurrenceIndex = occurrenceMap.get(baseKey) || 0;
+      occurrenceMap.set(baseKey, occurrenceIndex + 1);
       tasks.push({
         originalLine: index,
         text: remainingText,
@@ -211,7 +215,8 @@ function parseTasks(content, stats) {
         date,
         time,
         isArchived: isArchivedSection,
-        isProcessed
+        isProcessed,
+        occurrenceIndex
       });
     }
   });
