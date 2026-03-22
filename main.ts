@@ -153,7 +153,7 @@ export default class LifeGaugePlugin extends Plugin {
 
             if (changed) {
                 await this.saveSettings();
-            } else if (fileContentChanged) {
+            } else {
                 this.refreshViews();
             }
         } finally {

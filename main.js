@@ -168,6 +168,9 @@ function parseTasks(content, stats) {
       const isProcessed = line.trim().endsWith("(done)");
       const completed = match[1] === "x";
       let remainingText = match[2];
+      if (isProcessed) {
+        remainingText = remainingText.replace(/\s*\(done\)$/, "").trim();
+      }
       const rewards = [];
       const rewardMatch = rewardSectionRegex.exec(remainingText);
       if (rewardMatch) {
@@ -578,7 +581,7 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
       }
       if (changed) {
         await this.saveSettings();
-      } else if (fileContentChanged) {
+      } else {
         this.refreshViews();
       }
     } finally {

@@ -53,6 +53,10 @@ export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
             const completed = match[1] === 'x';
             let remainingText = match[2];
 
+            if (isProcessed) {
+                remainingText = remainingText.replace(/\s*\(done\)$/, '').trim();
+            }
+
             // 1. Extract Rewards
             const rewards: TaskReward[] = [];
             const rewardMatch = rewardSectionRegex.exec(remainingText);
