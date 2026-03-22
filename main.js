@@ -143,6 +143,10 @@ function getNextTitle(totalXp, titles) {
 var import_obsidian = require("obsidian");
 
 // src/parser.ts
+function getTaskKey(task) {
+  const rewardsKey = (task.rewards || []).map((r) => `${r.statId}${r.amount}`).sort().join(",");
+  return `${task.text}:${rewardsKey}:${task.date || ""}:${task.time || ""}`;
+}
 function parseTasks(content, stats) {
   const lines = content.split("\n");
   const tasks = [];
@@ -381,36 +385,19 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       this.plugin.lastKnownContent = newContent;
       const oldTotalXp = getTotalXp(this.plugin.settings.stats);
       const currentTitle = getCurrentTitle(oldTotalXp, this.plugin.settings.titles);
-      const taskId = `${task.text}:${task.rewards.map((r) => `${r.statId}${r.amount}`).join(",")}`;
+      const taskId = getTaskKey(task);
       const now = /* @__PURE__ */ new Date();
       const penaltyInfo = this.plugin.getPenaltyInfo(task, now);
-      task.rewards.forEach((reward) => {
-        const stat = this.plugin.settings.stats.find((s) => s.id === reward.statId);
-        if (stat) {
-          if (completed) {
-            const finalReward = reward.amount * penaltyInfo.multiplier;
-            stat.currentXp += finalReward;
-            if (stat.currentXp < 0)
-              stat.currentXp = 0;
-          } else {
-            stat.currentXp = Math.max(0, stat.currentXp - reward.amount);
-          }
+      if (completed) {
+        this.plugin.applyReward(task, penaltyInfo);
+        this.plugin.settings.completedTasks.push(taskId);
+      } else {
+        this.plugin.applyUnreward(task);
+        const index = this.plugin.settings.completedTasks.indexOf(taskId);
+        if (index > -1) {
+          this.plugin.settings.completedTasks.splice(index, 1);
         }
-      });
-      task.skills.forEach((skillName) => {
-        const skill = this.plugin.settings.skills.find((s) => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
-        if (skill) {
-          const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
-          if (completed) {
-            const finalReward = totalReward * penaltyInfo.multiplier;
-            skill.currentXp += finalReward;
-            if (skill.currentXp < 0)
-              skill.currentXp = 0;
-          } else {
-            skill.currentXp = Math.max(0, skill.currentXp - totalReward);
-          }
-        }
-      });
+      }
       const rewardsList = task.rewards.map((r) => {
         const stat = this.plugin.settings.stats.find((s) => s.id === r.statId);
         const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
@@ -424,13 +411,6 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
 ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
       } else if (completed) {
         new import_obsidian.Notice(`\u2705 Nhi\u1EC7m v\u1EE5 ho\xE0n th\xE0nh: ${task.text}${rewardMsg}`);
-      }
-      if (completed) {
-        if (!this.plugin.settings.completedTasks.includes(taskId)) {
-          this.plugin.settings.completedTasks.push(taskId);
-        }
-      } else {
-        this.plugin.settings.completedTasks = this.plugin.settings.completedTasks.filter((id) => id !== taskId);
       }
       await this.plugin.saveSettings();
       const newTotalXp = getTotalXp(this.plugin.settings.stats);
@@ -451,6 +431,8 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
     super(...arguments);
     __publicField(this, "settings");
     __publicField(this, "isInternalChange", false);
+    __publicField(this, "isSyncing", false);
+    __publicField(this, "pendingSync", false);
     __publicField(this, "lastKnownContent", "");
   }
   async onload() {
@@ -473,93 +455,130 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
       })
     );
   }
-  async syncTasksFromFile(file) {
-    const content = await this.app.vault.read(file);
-    if (content === this.lastKnownContent)
-      return;
-    const oldTasks = parseTasks(this.lastKnownContent, this.settings.stats);
-    const newTasks = parseTasks(content, this.settings.stats);
-    const getTaskKey = (t) => `${t.text}:${t.rewards.map((r) => `${r.statId}${r.amount}`).sort().join(",")}`;
-    const oldCounts = /* @__PURE__ */ new Map();
-    oldTasks.filter((t) => t.completed).forEach((t) => {
-      const key = getTaskKey(t);
-      oldCounts.set(key, (oldCounts.get(key) || 0) + 1);
-    });
-    const newCounts = /* @__PURE__ */ new Map();
-    newTasks.filter((t) => t.completed).forEach((t) => {
-      const key = getTaskKey(t);
-      newCounts.set(key, (newCounts.get(key) || 0) + 1);
-    });
-    const now = /* @__PURE__ */ new Date();
-    let changed = false;
-    const allKeys = /* @__PURE__ */ new Set([...oldCounts.keys(), ...newCounts.keys()]);
-    for (const key of allKeys) {
-      const nOld = oldCounts.get(key) || 0;
-      const nNew = newCounts.get(key) || 0;
-      const delta = nNew - nOld;
-      if (delta === 0)
-        continue;
-      const task = (delta > 0 ? newTasks : oldTasks).find((t) => getTaskKey(t) === key && t.completed);
-      if (!task)
-        continue;
-      const penaltyInfo = this.getPenaltyInfo(task, now);
-      for (let i = 0; i < Math.abs(delta); i++) {
-        if (delta > 0) {
-          task.rewards.forEach((reward) => {
-            const stat = this.settings.stats.find((s) => s.id === reward.statId);
-            if (stat) {
-              const finalReward = reward.amount * penaltyInfo.multiplier;
-              stat.currentXp += finalReward;
-              if (stat.currentXp < 0)
-                stat.currentXp = 0;
-            }
-          });
-          task.skills.forEach((skillName) => {
-            const skill = this.settings.skills.find((s) => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
-            if (skill) {
-              const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
-              const finalReward = totalReward * penaltyInfo.multiplier;
-              skill.currentXp += finalReward;
-              if (skill.currentXp < 0)
-                skill.currentXp = 0;
-            }
-          });
-          const rewardsList = task.rewards.map((r) => {
-            const stat = this.settings.stats.find((s) => s.id === r.statId);
-            const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
-            return `${finalAmount > 0 ? "+" : ""}${finalAmount} ${stat ? stat.name : r.statId}`;
-          }).join(", ");
-          const rewardMsg = rewardsList ? ` (${rewardsList})` : "";
-          if (penaltyInfo.isLate) {
-            const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
-            const statusMsg = penaltyInfo.multiplier < 0 ? `B\u1ECB tr\u1EEB ${-Math.round(penaltyInfo.multiplier * 100)}% \u0111i\u1EC3m` : `Gi\u1EA3m ${reductionPercent}% \u0111i\u1EC3m`;
-            new import_obsidian2.Notice(`\u26A0\uFE0F Ho\xE0n th\xE0nh tr\u1EC5: ${task.text}${rewardMsg}
-${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
-          } else {
-            new import_obsidian2.Notice(`\u2705 Nhi\u1EC7m v\u1EE5 ho\xE0n th\xE0nh: ${task.text}${rewardMsg}`);
-          }
-        } else {
-          task.rewards.forEach((reward) => {
-            const stat = this.settings.stats.find((s) => s.id === reward.statId);
-            if (stat)
-              stat.currentXp = Math.max(0, stat.currentXp - reward.amount);
-          });
-          task.skills.forEach((skillName) => {
-            const skill = this.settings.skills.find((s) => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
-            if (skill) {
-              const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
-              skill.currentXp = Math.max(0, skill.currentXp - totalReward);
-            }
-          });
-        }
-        changed = true;
+  applyReward(task, penaltyInfo) {
+    task.rewards.forEach((reward) => {
+      const stat = this.settings.stats.find((s) => s.id === reward.statId);
+      if (stat) {
+        const finalReward = reward.amount * penaltyInfo.multiplier;
+        stat.currentXp += finalReward;
+        if (stat.currentXp < 0)
+          stat.currentXp = 0;
       }
+    });
+    task.skills.forEach((skillName) => {
+      const skill = this.settings.skills.find((s) => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
+      if (skill) {
+        const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
+        const finalReward = totalReward * penaltyInfo.multiplier;
+        skill.currentXp += finalReward;
+        if (skill.currentXp < 0)
+          skill.currentXp = 0;
+      }
+    });
+  }
+  applyUnreward(task) {
+    task.rewards.forEach((reward) => {
+      const stat = this.settings.stats.find((s) => s.id === reward.statId);
+      if (stat)
+        stat.currentXp = Math.max(0, stat.currentXp - reward.amount);
+    });
+    task.skills.forEach((skillName) => {
+      const skill = this.settings.skills.find((s) => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
+      if (skill) {
+        const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
+        skill.currentXp = Math.max(0, skill.currentXp - totalReward);
+      }
+    });
+  }
+  async syncTasksFromFile(file) {
+    if (this.isSyncing) {
+      this.pendingSync = true;
+      return;
     }
-    this.lastKnownContent = content;
-    if (changed) {
-      await this.saveSettings();
-    } else {
-      this.refreshViews();
+    this.isSyncing = true;
+    try {
+      const content = await this.app.vault.read(file);
+      if (content === this.lastKnownContent)
+        return;
+      const oldTasks = this.lastKnownContent ? parseTasks(this.lastKnownContent, this.settings.stats) : [];
+      const newTasks = parseTasks(content, this.settings.stats);
+      const oldCounts = /* @__PURE__ */ new Map();
+      oldTasks.filter((t) => t.completed).forEach((t) => {
+        const key = getTaskKey(t);
+        oldCounts.set(key, (oldCounts.get(key) || 0) + 1);
+      });
+      const newCounts = /* @__PURE__ */ new Map();
+      newTasks.filter((t) => t.completed).forEach((t) => {
+        const key = getTaskKey(t);
+        newCounts.set(key, (newCounts.get(key) || 0) + 1);
+      });
+      const rewardedCounts = /* @__PURE__ */ new Map();
+      this.settings.completedTasks.forEach((key) => {
+        rewardedCounts.set(key, (rewardedCounts.get(key) || 0) + 1);
+      });
+      const now = /* @__PURE__ */ new Date();
+      let changed = false;
+      const sessionChangedKeys = /* @__PURE__ */ new Set([...oldCounts.keys(), ...newCounts.keys()]);
+      for (const key of sessionChangedKeys) {
+        const nOld = oldCounts.get(key) || 0;
+        const nNew = newCounts.get(key) || 0;
+        const deltaSession = nNew - nOld;
+        if (deltaSession === 0)
+          continue;
+        const task = (deltaSession > 0 ? newTasks : oldTasks).find((t) => getTaskKey(t) === key && t.completed) || newTasks.find((t) => getTaskKey(t) === key) || oldTasks.find((t) => getTaskKey(t) === key);
+        if (!task)
+          continue;
+        const penaltyInfo = this.getPenaltyInfo(task, now);
+        for (let i = 0; i < Math.abs(deltaSession); i++) {
+          const nRewarded = rewardedCounts.get(key) || 0;
+          if (deltaSession > 0) {
+            if (nNew > nRewarded) {
+              this.applyReward(task, penaltyInfo);
+              this.settings.completedTasks.push(key);
+              rewardedCounts.set(key, nRewarded + 1);
+              const rewardsList = task.rewards.map((r) => {
+                const stat = this.settings.stats.find((s) => s.id === r.statId);
+                const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
+                return `${finalAmount > 0 ? "+" : ""}${finalAmount} ${stat ? stat.name : r.statId}`;
+              }).join(", ");
+              const rewardMsg = rewardsList ? ` (${rewardsList})` : "";
+              if (penaltyInfo.isLate) {
+                const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
+                const statusMsg = penaltyInfo.multiplier < 0 ? `B\u1ECB tr\u1EEB ${-Math.round(penaltyInfo.multiplier * 100)}% \u0111i\u1EC3m` : `Gi\u1EA3m ${reductionPercent}% \u0111i\u1EC3m`;
+                new import_obsidian2.Notice(`\u26A0\uFE0F Ho\xE0n th\xE0nh tr\u1EC5: ${task.text}${rewardMsg}
+${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
+              } else {
+                new import_obsidian2.Notice(`\u2705 Nhi\u1EC7m v\u1EE5 ho\xE0n th\xE0nh: ${task.text}${rewardMsg}`);
+              }
+            }
+          } else {
+            if (nRewarded > nNew) {
+              this.applyUnreward(task);
+              const idx = this.settings.completedTasks.indexOf(key);
+              if (idx > -1) {
+                this.settings.completedTasks.splice(idx, 1);
+                rewardedCounts.set(key, nRewarded - 1);
+              }
+            }
+          }
+          changed = true;
+        }
+      }
+      this.lastKnownContent = content;
+      if (changed) {
+        await this.saveSettings();
+      } else {
+        this.refreshViews();
+      }
+    } finally {
+      this.isSyncing = false;
+      if (this.pendingSync) {
+        this.pendingSync = false;
+        const file2 = this.app.vault.getAbstractFileByPath(this.settings.taskFilePath);
+        if (file2 instanceof import_obsidian2.TFile) {
+          await this.syncTasksFromFile(file2);
+        }
+      }
     }
   }
   getPenaltyInfo(task, now) {
@@ -627,6 +646,12 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
     }));
     new import_obsidian2.Setting(containerEl).setName("Task File Path").setDesc("Path to the Markdown file containing your tasks.").addText((text) => text.setValue(this.plugin.settings.taskFilePath).onChange(async (value) => {
       this.plugin.settings.taskFilePath = value;
+      const file = this.app.vault.getAbstractFileByPath(value);
+      if (file instanceof import_obsidian2.TFile) {
+        this.plugin.lastKnownContent = await this.app.vault.read(file);
+      } else {
+        this.plugin.lastKnownContent = "";
+      }
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "\u{1F480} C\u1EA5u h\xECnh h\xECnh ph\u1EA1t" });

@@ -81,44 +81,43 @@ export default class LifeGaugePlugin extends Plugin {
             const content = await this.app.vault.read(file);
             if (content === this.lastKnownContent) return;
 
+            // 1. Calculate delta in CURRENT SESSION
+            const oldTasks = this.lastKnownContent ? parseTasks(this.lastKnownContent, this.settings.stats) : [];
             const newTasks = parseTasks(content, this.settings.stats);
             
-            // 1. Current file state (New Counts)
+            const oldCounts = new Map<string, number>();
+            oldTasks.filter(t => t.completed).forEach(t => {
+                const key = getTaskKey(t);
+                oldCounts.set(key, (oldCounts.get(key) || 0) + 1);
+            });
+
             const newCounts = new Map<string, number>();
             newTasks.filter(t => t.completed).forEach(t => {
                 const key = getTaskKey(t);
                 newCounts.set(key, (newCounts.get(key) || 0) + 1);
             });
 
-            // 2. Current rewarded state from settings (Rewarded Counts)
+            // 2. Map current rewarded state from settings (Rewarded Counts) - THE GUARD
             const rewardedCounts = new Map<string, number>();
             this.settings.completedTasks.forEach(key => {
                 rewardedCounts.set(key, (rewardedCounts.get(key) || 0) + 1);
             });
 
-            // 3. For notices: what changed since last known content in this session
-            const oldTasks = this.lastKnownContent ? parseTasks(this.lastKnownContent, this.settings.stats) : [];
-            const oldCountsInSession = new Map<string, number>();
-            oldTasks.filter(t => t.completed).forEach(t => {
-                const key = getTaskKey(t);
-                oldCountsInSession.set(key, (oldCountsInSession.get(key) || 0) + 1);
-            });
-
             const now = new Date();
             let changed = false;
 
-            // 4. Reconcile differences between File and settings.completedTasks
-            const allKeys = new Set([...newCounts.keys(), ...rewardedCounts.keys()]);
+            // 3. Find unique keys that changed in this session
+            const sessionChangedKeys = new Set([...oldCounts.keys(), ...newCounts.keys()]);
             
-            for (const key of allKeys) {
+            for (const key of sessionChangedKeys) {
+                const nOld = oldCounts.get(key) || 0;
                 const nNew = newCounts.get(key) || 0;
-                const nRewarded = rewardedCounts.get(key) || 0;
-                const delta = nNew - nRewarded;
+                const deltaSession = nNew - nOld;
 
-                if (delta === 0) continue;
+                if (deltaSession === 0) continue;
 
                 // Find a task object to get rewards/metadata
-                const task = (delta > 0 ? newTasks : oldTasks).find(t => getTaskKey(t) === key && t.completed)
+                const task = (deltaSession > 0 ? newTasks : oldTasks).find(t => getTaskKey(t) === key && t.completed)
                              || newTasks.find(t => getTaskKey(t) === key)
                              || oldTasks.find(t => getTaskKey(t) === key);
                 
@@ -126,15 +125,17 @@ export default class LifeGaugePlugin extends Plugin {
 
                 const penaltyInfo = this.getPenaltyInfo(task, now);
 
-                for (let i = 0; i < Math.abs(delta); i++) {
-                    if (delta > 0) {
-                        // Newly completed in file but NOT rewarded in settings
-                        this.applyReward(task, penaltyInfo);
-                        this.settings.completedTasks.push(key);
-                        
-                        // Show notice ONLY if it's a new change in this session (not a startup reconciliation)
-                        const nOldInSession = oldCountsInSession.get(key) || 0;
-                        if (nNew > nOldInSession) {
+                for (let i = 0; i < Math.abs(deltaSession); i++) {
+                    const nRewarded = (rewardedCounts.get(key) || 0);
+                    
+                    if (deltaSession > 0) {
+                        // Newly checked in session
+                        // GUARD: only reward if nNew > nRewarded (meaning it's not yet rewarded in settings)
+                        if (nNew > nRewarded) {
+                            this.applyReward(task, penaltyInfo);
+                            this.settings.completedTasks.push(key);
+                            rewardedCounts.set(key, nRewarded + 1);
+                            
                             const rewardsList = task.rewards.map((r: any) => {
                                 const stat = this.settings.stats.find(s => s.id === r.statId);
                                 const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
@@ -151,10 +152,16 @@ export default class LifeGaugePlugin extends Plugin {
                             }
                         }
                     } else {
-                        // Removed from file or unchecked, but still rewarded in settings
-                        this.applyUnreward(task);
-                        const idx = this.settings.completedTasks.indexOf(key);
-                        if (idx > -1) this.settings.completedTasks.splice(idx, 1);
+                        // Newly unchecked in session
+                        // GUARD: only un-reward if nRewarded > nNew (meaning we have more rewards in settings than in file)
+                        if (nRewarded > nNew) {
+                             this.applyUnreward(task);
+                             const idx = this.settings.completedTasks.indexOf(key);
+                             if (idx > -1) {
+                                 this.settings.completedTasks.splice(idx, 1);
+                                 rewardedCounts.set(key, nRewarded - 1);
+                             }
+                        }
                     }
                     changed = true;
                 }
