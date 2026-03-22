@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, TFile, normalizePath, Notice } from 'obsidian';
 import { Stat, Title, getTotalXp, getCurrentTitle, getNextTitle, calculateLevel, getRequiredXp } from './data';
-import { parseTasks, updateTaskInContent, LifeGaugeTask } from './parser';
+import { parseTasks, updateTaskInContent, LifeGaugeTask, getTaskKey } from './parser';
 import LifeGaugePlugin from '../main';
 
 export const VIEW_TYPE_LIFE_GAUGE = 'life-gauge-view';
@@ -226,38 +226,21 @@ export class LifeGaugeView extends ItemView {
             const oldTotalXp = getTotalXp(this.plugin.settings.stats);
             const currentTitle = getCurrentTitle(oldTotalXp, this.plugin.settings.titles);
 
-            // 3. Update stats and tracking
-            const taskId = `${task.text}:${task.rewards.map(r => `${r.statId}${r.amount}`).join(',')}`;
+            // 3. Update stats and tracking using plugin helpers
+            const taskId = getTaskKey(task);
             const now = new Date();
             const penaltyInfo = this.plugin.getPenaltyInfo(task, now);
 
-            task.rewards.forEach(reward => {
-                const stat = this.plugin.settings.stats.find(s => s.id === reward.statId);
-                if (stat) {
-                    if (completed) {
-                        const finalReward = reward.amount * penaltyInfo.multiplier;
-                        stat.currentXp += finalReward;
-                        if (stat.currentXp < 0) stat.currentXp = 0;
-                    } else {
-                        stat.currentXp = Math.max(0, stat.currentXp - reward.amount);
-                    }
+            if (completed) {
+                this.plugin.applyReward(task, penaltyInfo);
+                this.plugin.settings.completedTasks.push(taskId);
+            } else {
+                this.plugin.applyUnreward(task);
+                const index = this.plugin.settings.completedTasks.indexOf(taskId);
+                if (index > -1) {
+                    this.plugin.settings.completedTasks.splice(index, 1);
                 }
-            });
-
-            // Award/Subtract Skill XP
-            task.skills.forEach(skillName => {
-                const skill = this.plugin.settings.skills.find(s => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
-                if (skill) {
-                    const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
-                    if (completed) {
-                        const finalReward = totalReward * penaltyInfo.multiplier;
-                        skill.currentXp += finalReward;
-                        if (skill.currentXp < 0) skill.currentXp = 0;
-                    } else {
-                        skill.currentXp = Math.max(0, skill.currentXp - totalReward);
-                    }
-                }
-            });
+            }
 
             const rewardsList = task.rewards.map(r => {
                 const stat = this.plugin.settings.stats.find(s => s.id === r.statId);
@@ -272,14 +255,6 @@ export class LifeGaugeView extends ItemView {
                 new Notice(`⚠️ Hoàn thành trễ: ${task.text}${rewardMsg}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
             } else if (completed) {
                 new Notice(`✅ Nhiệm vụ hoàn thành: ${task.text}${rewardMsg}`);
-            }
-
-            if (completed) {
-                if (!this.plugin.settings.completedTasks.includes(taskId)) {
-                    this.plugin.settings.completedTasks.push(taskId);
-                }
-            } else {
-                this.plugin.settings.completedTasks = this.plugin.settings.completedTasks.filter(id => id !== taskId);
             }
 
             await this.plugin.saveSettings(); // This will call refreshViews() and thus update()

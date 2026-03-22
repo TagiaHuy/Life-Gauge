@@ -15,6 +15,13 @@ export interface LifeGaugeTask {
     time?: string;
     isArchived: boolean;
 }
+export function getTaskKey(task: LifeGaugeTask): string {
+    const rewardsKey = (task.rewards || [])
+        .map(r => `${r.statId}${r.amount}`)
+        .sort()
+        .join(',');
+    return `${task.text}:${rewardsKey}:${task.date || ''}:${task.time || ''}`;
+}
 
 export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
     const lines = content.split('\n');

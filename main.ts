@@ -1,11 +1,13 @@
 import { Plugin, PluginSettingTab, App, Setting, normalizePath, TFile, Notice } from 'obsidian';
 import { LifeGaugeSettings, DEFAULT_SETTINGS, Stat, DEFAULT_STATS } from './src/data';
 import { LifeGaugeView, VIEW_TYPE_LIFE_GAUGE } from './src/view';
-import { parseTasks } from './src/parser';
+import { parseTasks, getTaskKey } from './src/parser';
 
 export default class LifeGaugePlugin extends Plugin {
     settings!: LifeGaugeSettings;
     isInternalChange = false;
+    isSyncing = false;
+    pendingSync = false;
     lastKnownContent = "";
 
     async onload() {
@@ -33,106 +35,147 @@ export default class LifeGaugePlugin extends Plugin {
         );
     }
 
-    async syncTasksFromFile(file: TFile) {
-        const content = await this.app.vault.read(file);
-        if (content === this.lastKnownContent) return;
-
-        const oldTasks = parseTasks(this.lastKnownContent, this.settings.stats);
-        const newTasks = parseTasks(content, this.settings.stats);
-        
-        const getTaskKey = (t: any) => `${t.text}:${t.rewards.map((r: any) => `${r.statId}${r.amount}`).sort().join(',')}`;
-        
-        const oldCounts = new Map<string, number>();
-        oldTasks.filter(t => t.completed).forEach(t => {
-            const key = getTaskKey(t);
-            oldCounts.set(key, (oldCounts.get(key) || 0) + 1);
-        });
-
-        const newCounts = new Map<string, number>();
-        newTasks.filter(t => t.completed).forEach(t => {
-            const key = getTaskKey(t);
-            newCounts.set(key, (newCounts.get(key) || 0) + 1);
-        });
-
-        const now = new Date();
-        let changed = false;
-
-        // Find all unique keys
-        const allKeys = new Set([...oldCounts.keys(), ...newCounts.keys()]);
-        
-        for (const key of allKeys) {
-            const nOld = oldCounts.get(key) || 0;
-            const nNew = newCounts.get(key) || 0;
-            const delta = nNew - nOld;
-
-            if (delta === 0) continue;
-
-            // Find the task object to get rewards/metadata
-            const task = (delta > 0 ? newTasks : oldTasks).find(t => getTaskKey(t) === key && t.completed);
-            if (!task) continue;
-
-            const penaltyInfo = this.getPenaltyInfo(task, now);
-
-            for (let i = 0; i < Math.abs(delta); i++) {
-                if (delta > 0) {
-                    // Newly completed
-                    task.rewards.forEach(reward => {
-                        const stat = this.settings.stats.find(s => s.id === reward.statId);
-                        if (stat) {
-                            const finalReward = reward.amount * penaltyInfo.multiplier;
-                            stat.currentXp += finalReward;
-                            if (stat.currentXp < 0) stat.currentXp = 0;
-                        }
-                    });
-                    
-                    task.skills.forEach(skillName => {
-                        const skill = this.settings.skills.find(s => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
-                        if (skill) {
-                            const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
-                            const finalReward = totalReward * penaltyInfo.multiplier;
-                            skill.currentXp += finalReward;
-                            if (skill.currentXp < 0) skill.currentXp = 0;
-                        }
-                    });
-
-                    const rewardsList = task.rewards.map(r => {
-                        const stat = this.settings.stats.find(s => s.id === r.statId);
-                        const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
-                        return `${finalAmount > 0 ? '+' : ''}${finalAmount} ${stat ? stat.name : r.statId}`;
-                    }).join(', ');
-                    const rewardMsg = rewardsList ? ` (${rewardsList})` : '';
-
-                    if (penaltyInfo.isLate) {
-                        const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
-                        const statusMsg = penaltyInfo.multiplier < 0 ? `Bị trừ ${-Math.round(penaltyInfo.multiplier * 100)}% điểm` : `Giảm ${reductionPercent}% điểm`;
-                        new Notice(`⚠️ Hoàn thành trễ: ${task.text}${rewardMsg}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
-                    } else {
-                        new Notice(`✅ Nhiệm vụ hoàn thành: ${task.text}${rewardMsg}`);
-                    }
-                } else {
-                    // Newly uncompleted (subtracted)
-                    task.rewards.forEach(reward => {
-                        const stat = this.settings.stats.find(s => s.id === reward.statId);
-                        if (stat) stat.currentXp = Math.max(0, stat.currentXp - reward.amount);
-                    });
-                    task.skills.forEach(skillName => {
-                        const skill = this.settings.skills.find(s => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
-                        if (skill) {
-                            const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
-                            skill.currentXp = Math.max(0, skill.currentXp - totalReward);
-                        }
-                    });
-                }
-                changed = true;
+    applyReward(task: any, penaltyInfo: { multiplier: number }) {
+        task.rewards.forEach((reward: any) => {
+            const stat = this.settings.stats.find(s => s.id === reward.statId);
+            if (stat) {
+                const finalReward = reward.amount * penaltyInfo.multiplier;
+                stat.currentXp += finalReward;
+                if (stat.currentXp < 0) stat.currentXp = 0;
             }
+        });
+        
+        task.skills.forEach((skillName: string) => {
+            const skill = this.settings.skills.find(s => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
+            if (skill) {
+                const totalReward = task.rewards.reduce((sum: number, r: any) => sum + r.amount, 0) || 10;
+                const finalReward = totalReward * penaltyInfo.multiplier;
+                skill.currentXp += finalReward;
+                if (skill.currentXp < 0) skill.currentXp = 0;
+            }
+        });
+    }
+
+    applyUnreward(task: any) {
+        task.rewards.forEach((reward: any) => {
+            const stat = this.settings.stats.find(s => s.id === reward.statId);
+            if (stat) stat.currentXp = Math.max(0, stat.currentXp - reward.amount);
+        });
+        task.skills.forEach((skillName: string) => {
+            const skill = this.settings.skills.find(s => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
+            if (skill) {
+                const totalReward = task.rewards.reduce((sum: number, r: any) => sum + r.amount, 0) || 10;
+                skill.currentXp = Math.max(0, skill.currentXp - totalReward);
+            }
+        });
+    }
+
+    async syncTasksFromFile(file: TFile) {
+        if (this.isSyncing) {
+            this.pendingSync = true;
+            return;
         }
 
-        this.lastKnownContent = content;
+        this.isSyncing = true;
+        try {
+            const content = await this.app.vault.read(file);
+            if (content === this.lastKnownContent) return;
 
-        if (changed) {
-            await this.saveSettings(); // saveSettings already calls saveData and refreshViews
-        } else {
-            this.refreshViews();
+            const newTasks = parseTasks(content, this.settings.stats);
+            
+            // 1. Current file state (New Counts)
+            const newCounts = new Map<string, number>();
+            newTasks.filter(t => t.completed).forEach(t => {
+                const key = getTaskKey(t);
+                newCounts.set(key, (newCounts.get(key) || 0) + 1);
+            });
+
+            // 2. Current rewarded state from settings (Rewarded Counts)
+            const rewardedCounts = new Map<string, number>();
+            this.settings.completedTasks.forEach(key => {
+                rewardedCounts.set(key, (rewardedCounts.get(key) || 0) + 1);
+            });
+
+            // 3. For notices: what changed since last known content in this session
+            const oldTasks = this.lastKnownContent ? parseTasks(this.lastKnownContent, this.settings.stats) : [];
+            const oldCountsInSession = new Map<string, number>();
+            oldTasks.filter(t => t.completed).forEach(t => {
+                const key = getTaskKey(t);
+                oldCountsInSession.set(key, (oldCountsInSession.get(key) || 0) + 1);
+            });
+
+            const now = new Date();
+            let changed = false;
+
+            // 4. Reconcile differences between File and settings.completedTasks
+            const allKeys = new Set([...newCounts.keys(), ...rewardedCounts.keys()]);
+            
+            for (const key of allKeys) {
+                const nNew = newCounts.get(key) || 0;
+                const nRewarded = rewardedCounts.get(key) || 0;
+                const delta = nNew - nRewarded;
+
+                if (delta === 0) continue;
+
+                // Find a task object to get rewards/metadata
+                const task = (delta > 0 ? newTasks : oldTasks).find(t => getTaskKey(t) === key && t.completed)
+                             || newTasks.find(t => getTaskKey(t) === key)
+                             || oldTasks.find(t => getTaskKey(t) === key);
+                
+                if (!task) continue;
+
+                const penaltyInfo = this.getPenaltyInfo(task, now);
+
+                for (let i = 0; i < Math.abs(delta); i++) {
+                    if (delta > 0) {
+                        // Newly completed in file but NOT rewarded in settings
+                        this.applyReward(task, penaltyInfo);
+                        this.settings.completedTasks.push(key);
+                        
+                        // Show notice ONLY if it's a new change in this session (not a startup reconciliation)
+                        const nOldInSession = oldCountsInSession.get(key) || 0;
+                        if (nNew > nOldInSession) {
+                            const rewardsList = task.rewards.map((r: any) => {
+                                const stat = this.settings.stats.find(s => s.id === r.statId);
+                                const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
+                                return `${finalAmount > 0 ? '+' : ''}${finalAmount} ${stat ? stat.name : r.statId}`;
+                            }).join(', ');
+                            const rewardMsg = rewardsList ? ` (${rewardsList})` : '';
+
+                            if (penaltyInfo.isLate) {
+                                const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
+                                const statusMsg = penaltyInfo.multiplier < 0 ? `Bị trừ ${-Math.round(penaltyInfo.multiplier * 100)}% điểm` : `Giảm ${reductionPercent}% điểm`;
+                                new Notice(`⚠️ Hoàn thành trễ: ${task.text}${rewardMsg}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
+                            } else {
+                                new Notice(`✅ Nhiệm vụ hoàn thành: ${task.text}${rewardMsg}`);
+                            }
+                        }
+                    } else {
+                        // Removed from file or unchecked, but still rewarded in settings
+                        this.applyUnreward(task);
+                        const idx = this.settings.completedTasks.indexOf(key);
+                        if (idx > -1) this.settings.completedTasks.splice(idx, 1);
+                    }
+                    changed = true;
+                }
+            }
+
+            this.lastKnownContent = content;
+
+            if (changed) {
+                await this.saveSettings();
+            } else {
+                this.refreshViews();
+            }
+        } finally {
+            this.isSyncing = false;
+            if (this.pendingSync) {
+                this.pendingSync = false;
+                const file = this.app.vault.getAbstractFileByPath(this.settings.taskFilePath);
+                if (file instanceof TFile) {
+                    await this.syncTasksFromFile(file);
+                }
+            }
         }
     }
 
@@ -230,6 +273,12 @@ class LifeGaugeSettingTab extends PluginSettingTab {
                 .setValue(this.plugin.settings.taskFilePath)
                 .onChange(async (value) => {
                     this.plugin.settings.taskFilePath = value;
+                    const file = this.app.vault.getAbstractFileByPath(value);
+                    if (file instanceof TFile) {
+                        this.plugin.lastKnownContent = await this.app.vault.read(file);
+                    } else {
+                        this.plugin.lastKnownContent = "";
+                    }
                     await this.plugin.saveSettings();
                 }));
 
