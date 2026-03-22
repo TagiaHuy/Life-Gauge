@@ -378,6 +378,7 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       const content = await this.app.vault.read(file);
       const newContent = updateTaskInContent(content, task.originalLine, completed);
       await this.app.vault.modify(file, newContent);
+      this.plugin.lastKnownContent = newContent;
       const oldTotalXp = getTotalXp(this.plugin.settings.stats);
       const currentTitle = getCurrentTitle(oldTotalXp, this.plugin.settings.titles);
       const taskId = `${task.text}:${task.rewards.map((r) => `${r.statId}${r.amount}`).join(",")}`;
@@ -450,6 +451,7 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
     super(...arguments);
     __publicField(this, "settings");
     __publicField(this, "isInternalChange", false);
+    __publicField(this, "lastKnownContent", "");
   }
   async onload() {
     await this.loadSettings();
@@ -467,76 +469,97 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
           return;
         if (file instanceof import_obsidian2.TFile && file.path === this.settings.taskFilePath) {
           await this.syncTasksFromFile(file);
-          this.refreshViews();
         }
       })
     );
   }
   async syncTasksFromFile(file) {
     const content = await this.app.vault.read(file);
-    const tasks = parseTasks(content, this.settings.stats);
+    if (content === this.lastKnownContent)
+      return;
+    const oldTasks = parseTasks(this.lastKnownContent, this.settings.stats);
+    const newTasks = parseTasks(content, this.settings.stats);
+    const getTaskKey = (t) => `${t.text}:${t.rewards.map((r) => `${r.statId}${r.amount}`).sort().join(",")}`;
+    const oldCounts = /* @__PURE__ */ new Map();
+    oldTasks.filter((t) => t.completed).forEach((t) => {
+      const key = getTaskKey(t);
+      oldCounts.set(key, (oldCounts.get(key) || 0) + 1);
+    });
+    const newCounts = /* @__PURE__ */ new Map();
+    newTasks.filter((t) => t.completed).forEach((t) => {
+      const key = getTaskKey(t);
+      newCounts.set(key, (newCounts.get(key) || 0) + 1);
+    });
     const now = /* @__PURE__ */ new Date();
     let changed = false;
-    tasks.forEach((task) => {
-      const taskId = `${task.text}:${task.rewards.map((r) => `${r.statId}${r.amount}`).join(",")}`;
-      const wasCompleted = this.settings.completedTasks.includes(taskId);
-      if (task.completed && !wasCompleted) {
-        const penaltyInfo = this.getPenaltyInfo(task, now);
-        task.rewards.forEach((reward) => {
-          const stat = this.settings.stats.find((s) => s.id === reward.statId);
-          if (stat) {
-            const finalReward = reward.amount * penaltyInfo.multiplier;
-            stat.currentXp += finalReward;
-            if (stat.currentXp < 0)
-              stat.currentXp = 0;
-          }
-        });
-        task.skills.forEach((skillName) => {
-          const skill = this.settings.skills.find((s) => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
-          if (skill) {
-            const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
-            const finalReward = totalReward * penaltyInfo.multiplier;
-            skill.currentXp += finalReward;
-            if (skill.currentXp < 0)
-              skill.currentXp = 0;
-          }
-        });
-        const rewardsList = task.rewards.map((r) => {
-          const stat = this.settings.stats.find((s) => s.id === r.statId);
-          const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
-          return `${finalAmount > 0 ? "+" : ""}${finalAmount} ${stat ? stat.name : r.statId}`;
-        }).join(", ");
-        const rewardMsg = rewardsList ? ` (${rewardsList})` : "";
-        if (penaltyInfo.isLate) {
-          const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
-          const statusMsg = penaltyInfo.multiplier < 0 ? `B\u1ECB tr\u1EEB ${-Math.round(penaltyInfo.multiplier * 100)}% \u0111i\u1EC3m` : `Gi\u1EA3m ${reductionPercent}% \u0111i\u1EC3m`;
-          new import_obsidian2.Notice(`\u26A0\uFE0F Ho\xE0n th\xE0nh tr\u1EC5: ${task.text}${rewardMsg}
+    const allKeys = /* @__PURE__ */ new Set([...oldCounts.keys(), ...newCounts.keys()]);
+    for (const key of allKeys) {
+      const nOld = oldCounts.get(key) || 0;
+      const nNew = newCounts.get(key) || 0;
+      const delta = nNew - nOld;
+      if (delta === 0)
+        continue;
+      const task = (delta > 0 ? newTasks : oldTasks).find((t) => getTaskKey(t) === key && t.completed);
+      if (!task)
+        continue;
+      const penaltyInfo = this.getPenaltyInfo(task, now);
+      for (let i = 0; i < Math.abs(delta); i++) {
+        if (delta > 0) {
+          task.rewards.forEach((reward) => {
+            const stat = this.settings.stats.find((s) => s.id === reward.statId);
+            if (stat) {
+              const finalReward = reward.amount * penaltyInfo.multiplier;
+              stat.currentXp += finalReward;
+              if (stat.currentXp < 0)
+                stat.currentXp = 0;
+            }
+          });
+          task.skills.forEach((skillName) => {
+            const skill = this.settings.skills.find((s) => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
+            if (skill) {
+              const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
+              const finalReward = totalReward * penaltyInfo.multiplier;
+              skill.currentXp += finalReward;
+              if (skill.currentXp < 0)
+                skill.currentXp = 0;
+            }
+          });
+          const rewardsList = task.rewards.map((r) => {
+            const stat = this.settings.stats.find((s) => s.id === r.statId);
+            const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
+            return `${finalAmount > 0 ? "+" : ""}${finalAmount} ${stat ? stat.name : r.statId}`;
+          }).join(", ");
+          const rewardMsg = rewardsList ? ` (${rewardsList})` : "";
+          if (penaltyInfo.isLate) {
+            const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
+            const statusMsg = penaltyInfo.multiplier < 0 ? `B\u1ECB tr\u1EEB ${-Math.round(penaltyInfo.multiplier * 100)}% \u0111i\u1EC3m` : `Gi\u1EA3m ${reductionPercent}% \u0111i\u1EC3m`;
+            new import_obsidian2.Notice(`\u26A0\uFE0F Ho\xE0n th\xE0nh tr\u1EC5: ${task.text}${rewardMsg}
 ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
-        } else {
-          new import_obsidian2.Notice(`\u2705 Nhi\u1EC7m v\u1EE5 ho\xE0n th\xE0nh: ${task.text}${rewardMsg}`);
-        }
-        this.settings.completedTasks.push(taskId);
-        changed = true;
-      } else if (!task.completed && wasCompleted) {
-        const penaltyInfo = this.getPenaltyInfo(task, now);
-        task.rewards.forEach((reward) => {
-          const stat = this.settings.stats.find((s) => s.id === reward.statId);
-          if (stat)
-            stat.currentXp = Math.max(0, stat.currentXp - reward.amount);
-        });
-        task.skills.forEach((skillName) => {
-          const skill = this.settings.skills.find((s) => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
-          if (skill) {
-            const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
-            skill.currentXp = Math.max(0, skill.currentXp - totalReward);
+          } else {
+            new import_obsidian2.Notice(`\u2705 Nhi\u1EC7m v\u1EE5 ho\xE0n th\xE0nh: ${task.text}${rewardMsg}`);
           }
-        });
-        this.settings.completedTasks = this.settings.completedTasks.filter((id) => id !== taskId);
+        } else {
+          task.rewards.forEach((reward) => {
+            const stat = this.settings.stats.find((s) => s.id === reward.statId);
+            if (stat)
+              stat.currentXp = Math.max(0, stat.currentXp - reward.amount);
+          });
+          task.skills.forEach((skillName) => {
+            const skill = this.settings.skills.find((s) => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
+            if (skill) {
+              const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
+              skill.currentXp = Math.max(0, skill.currentXp - totalReward);
+            }
+          });
+        }
         changed = true;
       }
-    });
+    }
+    this.lastKnownContent = content;
     if (changed) {
-      await this.saveData(this.settings);
+      await this.saveSettings();
+    } else {
+      this.refreshViews();
     }
   }
   getPenaltyInfo(task, now) {
@@ -559,6 +582,10 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    const file = this.app.vault.getAbstractFileByPath(this.settings.taskFilePath);
+    if (file instanceof import_obsidian2.TFile) {
+      this.lastKnownContent = await this.app.vault.read(file);
+    }
   }
   async saveSettings() {
     await this.saveData(this.settings);

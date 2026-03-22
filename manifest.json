@@ -1,10 +1,10 @@
 {
 	"id": "life-gauge",
 	"name": "Life Gauge",
-	"version": "1.0.1",
+	"version": "1.0.2",
 	"minAppVersion": "0.15.0",
 	"description": "Gamify your Obsidian vault with a RPG-style life gauge dashboard, tracking HP, Stamina, Strength, and Knowledge through your tasks.",
-	"author": "Antigravity",
-	"authorUrl": "https://github.com/your-username/life-gauge",
+	"author": "TaGiaHuy",
+	"authorUrl": "https://github.com/TagiaHuy/Life-Gauge",
 	"isDesktopOnly": false
 }

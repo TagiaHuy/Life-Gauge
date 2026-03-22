@@ -220,6 +220,7 @@ export class LifeGaugeView extends ItemView {
             const content = await this.app.vault.read(file);
             const newContent = updateTaskInContent(content, task.originalLine, completed);
             await this.app.vault.modify(file, newContent);
+            this.plugin.lastKnownContent = newContent;
 
             // 2. Capture old state for rank up check
             const oldTotalXp = getTotalXp(this.plugin.settings.stats);

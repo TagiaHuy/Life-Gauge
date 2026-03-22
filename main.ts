@@ -6,6 +6,7 @@ import { parseTasks } from './src/parser';
 export default class LifeGaugePlugin extends Plugin {
     settings!: LifeGaugeSettings;
     isInternalChange = false;
+    lastKnownContent = "";
 
     async onload() {
         await this.loadSettings();
@@ -27,7 +28,6 @@ export default class LifeGaugePlugin extends Plugin {
                 if (this.isInternalChange) return;
                 if (file instanceof TFile && file.path === this.settings.taskFilePath) {
                     await this.syncTasksFromFile(file);
-                    this.refreshViews();
                 }
             })
         );
@@ -35,81 +35,104 @@ export default class LifeGaugePlugin extends Plugin {
 
     async syncTasksFromFile(file: TFile) {
         const content = await this.app.vault.read(file);
-        const tasks = parseTasks(content, this.settings.stats);
-        const now = new Date();
-        let changed = false;
+        if (content === this.lastKnownContent) return;
+
+        const oldTasks = parseTasks(this.lastKnownContent, this.settings.stats);
+        const newTasks = parseTasks(content, this.settings.stats);
         
-        tasks.forEach(task => {
-            const taskId = `${task.text}:${task.rewards.map(r => `${r.statId}${r.amount}`).join(',')}`;
-            const wasCompleted = this.settings.completedTasks.includes(taskId);
-            
-            if (task.completed && !wasCompleted) {
-                // Newly completed
-                const penaltyInfo = this.getPenaltyInfo(task, now);
-                
-                task.rewards.forEach(reward => {
-                    const stat = this.settings.stats.find(s => s.id === reward.statId);
-                    if (stat) {
-                        const finalReward = reward.amount * penaltyInfo.multiplier;
-                        stat.currentXp += finalReward;
-                        if (stat.currentXp < 0) stat.currentXp = 0; // Still cap total XP at 0, but reward can be negative
-                    }
-                });
-                
-                task.skills.forEach(skillName => {
-                    const skill = this.settings.skills.find(s => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
-                    if (skill) {
-                        const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
-                        const finalReward = totalReward * penaltyInfo.multiplier;
-                        skill.currentXp += finalReward;
-                        if (skill.currentXp < 0) skill.currentXp = 0;
-                    }
-                });
-
-                const rewardsList = task.rewards.map(r => {
-                    const stat = this.settings.stats.find(s => s.id === r.statId);
-                    const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
-                    return `${finalAmount > 0 ? '+' : ''}${finalAmount} ${stat ? stat.name : r.statId}`;
-                }).join(', ');
-                const rewardMsg = rewardsList ? ` (${rewardsList})` : '';
-
-                if (penaltyInfo.isLate) {
-                    const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
-                    const statusMsg = penaltyInfo.multiplier < 0 ? `Bị trừ ${-Math.round(penaltyInfo.multiplier * 100)}% điểm` : `Giảm ${reductionPercent}% điểm`;
-                    new Notice(`⚠️ Hoàn thành trễ: ${task.text}${rewardMsg}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
-                } else {
-                    new Notice(`✅ Nhiệm vụ hoàn thành: ${task.text}${rewardMsg}`);
-                }
-
-                this.settings.completedTasks.push(taskId);
-                changed = true;
-            } else if (!task.completed && wasCompleted) {
-                // Newly unchecked - subtract reward (not handled by penalty formula for simplicity, just remove what was earned)
-                // Actually, to be fair, we should probably subtract the penalty reward if it was late.
-                // But since we don't store the exact amount awarded per task instance, let's just use current multiplier.
-                // Or better: for unchecking, we just revert. 
-                // But we don't know what the multiplier was when it was checked.
-                // For now, let's just subtract the full reward or the penalized reward.
-                const penaltyInfo = this.getPenaltyInfo(task, now);
-
-                task.rewards.forEach(reward => {
-                    const stat = this.settings.stats.find(s => s.id === reward.statId);
-                    if (stat) stat.currentXp = Math.max(0, stat.currentXp - reward.amount);
-                });
-                task.skills.forEach(skillName => {
-                    const skill = this.settings.skills.find(s => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
-                    if (skill) {
-                        const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
-                        skill.currentXp = Math.max(0, skill.currentXp - totalReward);
-                    }
-                });
-                this.settings.completedTasks = this.settings.completedTasks.filter(id => id !== taskId);
-                changed = true;
-            }
+        const getTaskKey = (t: any) => `${t.text}:${t.rewards.map((r: any) => `${r.statId}${r.amount}`).sort().join(',')}`;
+        
+        const oldCounts = new Map<string, number>();
+        oldTasks.filter(t => t.completed).forEach(t => {
+            const key = getTaskKey(t);
+            oldCounts.set(key, (oldCounts.get(key) || 0) + 1);
         });
 
+        const newCounts = new Map<string, number>();
+        newTasks.filter(t => t.completed).forEach(t => {
+            const key = getTaskKey(t);
+            newCounts.set(key, (newCounts.get(key) || 0) + 1);
+        });
+
+        const now = new Date();
+        let changed = false;
+
+        // Find all unique keys
+        const allKeys = new Set([...oldCounts.keys(), ...newCounts.keys()]);
+        
+        for (const key of allKeys) {
+            const nOld = oldCounts.get(key) || 0;
+            const nNew = newCounts.get(key) || 0;
+            const delta = nNew - nOld;
+
+            if (delta === 0) continue;
+
+            // Find the task object to get rewards/metadata
+            const task = (delta > 0 ? newTasks : oldTasks).find(t => getTaskKey(t) === key && t.completed);
+            if (!task) continue;
+
+            const penaltyInfo = this.getPenaltyInfo(task, now);
+
+            for (let i = 0; i < Math.abs(delta); i++) {
+                if (delta > 0) {
+                    // Newly completed
+                    task.rewards.forEach(reward => {
+                        const stat = this.settings.stats.find(s => s.id === reward.statId);
+                        if (stat) {
+                            const finalReward = reward.amount * penaltyInfo.multiplier;
+                            stat.currentXp += finalReward;
+                            if (stat.currentXp < 0) stat.currentXp = 0;
+                        }
+                    });
+                    
+                    task.skills.forEach(skillName => {
+                        const skill = this.settings.skills.find(s => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
+                        if (skill) {
+                            const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
+                            const finalReward = totalReward * penaltyInfo.multiplier;
+                            skill.currentXp += finalReward;
+                            if (skill.currentXp < 0) skill.currentXp = 0;
+                        }
+                    });
+
+                    const rewardsList = task.rewards.map(r => {
+                        const stat = this.settings.stats.find(s => s.id === r.statId);
+                        const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
+                        return `${finalAmount > 0 ? '+' : ''}${finalAmount} ${stat ? stat.name : r.statId}`;
+                    }).join(', ');
+                    const rewardMsg = rewardsList ? ` (${rewardsList})` : '';
+
+                    if (penaltyInfo.isLate) {
+                        const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
+                        const statusMsg = penaltyInfo.multiplier < 0 ? `Bị trừ ${-Math.round(penaltyInfo.multiplier * 100)}% điểm` : `Giảm ${reductionPercent}% điểm`;
+                        new Notice(`⚠️ Hoàn thành trễ: ${task.text}${rewardMsg}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
+                    } else {
+                        new Notice(`✅ Nhiệm vụ hoàn thành: ${task.text}${rewardMsg}`);
+                    }
+                } else {
+                    // Newly uncompleted (subtracted)
+                    task.rewards.forEach(reward => {
+                        const stat = this.settings.stats.find(s => s.id === reward.statId);
+                        if (stat) stat.currentXp = Math.max(0, stat.currentXp - reward.amount);
+                    });
+                    task.skills.forEach(skillName => {
+                        const skill = this.settings.skills.find(s => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
+                        if (skill) {
+                            const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
+                            skill.currentXp = Math.max(0, skill.currentXp - totalReward);
+                        }
+                    });
+                }
+                changed = true;
+            }
+        }
+
+        this.lastKnownContent = content;
+
         if (changed) {
-            await this.saveData(this.settings);
+            await this.saveSettings(); // saveSettings already calls saveData and refreshViews
+        } else {
+            this.refreshViews();
         }
     }
 
@@ -138,6 +161,12 @@ export default class LifeGaugePlugin extends Plugin {
 
     async loadSettings() {
         this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+        
+        // Initialize lastKnownContent
+        const file = this.app.vault.getAbstractFileByPath(this.settings.taskFilePath);
+        if (file instanceof TFile) {
+            this.lastKnownContent = await this.app.vault.read(file);
+        }
     }
 
     async saveSettings() {
