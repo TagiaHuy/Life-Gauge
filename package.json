@@ -1,6 +1,6 @@
 {
 	"name": "life-gauge",
-	"version": "1.0.2",
+	"version": "1.0.3",
 	"description": "Life Gauge plugin for Obsidian",
 	"main": "main.js",
 	"scripts": {
@@ -9,7 +9,7 @@
 		"version": "node -e \"const fs=require('fs');const m=JSON.parse(fs.readFileSync('manifest.json','utf8'));const p=JSON.parse(fs.readFileSync('package.json','utf8'));p.version=m.version;fs.writeFileSync('package.json',JSON.stringify(p,null,2));\""
 	},
 	"keywords": [],
-	"author": "",
+	"author": "TaGiaHuy",
 	"license": "MIT",
 	"devDependencies": {
 		"@types/node": "^16.11.21",

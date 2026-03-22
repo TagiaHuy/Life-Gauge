@@ -1,7 +1,7 @@
 {
 	"id": "life-gauge",
 	"name": "Life Gauge",
-	"version": "1.0.2",
+	"version": "1.0.3",
 	"minAppVersion": "0.15.0",
 	"description": "Gamify your Obsidian vault with a RPG-style life gauge dashboard, tracking HP, Stamina, Strength, and Knowledge through your tasks.",
 	"author": "TaGiaHuy",
