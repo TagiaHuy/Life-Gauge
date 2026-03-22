@@ -164,6 +164,7 @@ function parseTasks(content, stats) {
     }
     const match = taskRegex.exec(line);
     if (match) {
+      const isProcessed = line.trim().endsWith("(done)");
       const completed = match[1] === "x";
       let remainingText = match[2];
       const rewards = [];
@@ -209,17 +210,25 @@ function parseTasks(content, stats) {
         skills,
         date,
         time,
-        isArchived: isArchivedSection
+        isArchived: isArchivedSection,
+        isProcessed
       });
     }
   });
   return tasks;
 }
-function updateTaskInContent(content, lineIndex, completed) {
+function updateTaskInContent(content, lineIndex, completed, addDone = false) {
   const lines = content.split("\n");
   if (lineIndex >= 0 && lineIndex < lines.length) {
-    const char = completed ? "x" : " ";
-    lines[lineIndex] = lines[lineIndex].replace(/\[[ x]\]/, `[${char}]`);
+    if (addDone) {
+      lines[lineIndex] = lines[lineIndex].replace(/\[[ x]\]/, `[x]`);
+      if (!lines[lineIndex].trim().endsWith("(done)")) {
+        lines[lineIndex] = lines[lineIndex].trimEnd() + " (done)";
+      }
+    } else {
+      const char = completed ? "x" : " ";
+      lines[lineIndex] = lines[lineIndex].replace(/\[[ x]\]/, `[${char}]`);
+    }
   }
   return lines.join("\n");
 }
@@ -350,7 +359,10 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       const item = questList.createEl("div", { cls: `lg-quest-item ${task.completed ? "is-completed" : ""}` });
       const checkbox = item.createEl("input", { type: "checkbox" });
       checkbox.checked = task.completed;
-      checkbox.addEventListener("change", () => this.handleTaskToggle(task, checkbox.checked));
+      checkbox.disabled = task.isProcessed;
+      if (!task.isProcessed) {
+        checkbox.addEventListener("change", () => this.handleTaskToggle(task, checkbox.checked));
+      }
       const textContainer = item.createEl("div", { cls: "lg-quest-text-container" });
       textContainer.createEl("span", { text: task.text, cls: "lg-quest-title" });
       if (task.rewards.length > 0 || task.skills.length > 0 || task.date || task.time) {
@@ -374,13 +386,15 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     });
   }
   async handleTaskToggle(task, completed) {
+    if (task.isProcessed)
+      return;
     const file = this.app.vault.getAbstractFileByPath(this.plugin.settings.taskFilePath);
     if (!(file instanceof import_obsidian.TFile))
       return;
     this.plugin.isInternalChange = true;
     try {
       const content = await this.app.vault.read(file);
-      const newContent = updateTaskInContent(content, task.originalLine, completed);
+      const newContent = updateTaskInContent(content, task.originalLine, completed, completed);
       await this.app.vault.modify(file, newContent);
       this.plugin.lastKnownContent = newContent;
       const oldTotalXp = getTotalXp(this.plugin.settings.stats);
@@ -490,6 +504,22 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
       }
     });
   }
+  showRewardNotice(task, penaltyInfo) {
+    const rewardsList = task.rewards.map((r) => {
+      const stat = this.settings.stats.find((s) => s.id === r.statId);
+      const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
+      return `${finalAmount > 0 ? "+" : ""}${finalAmount} ${stat ? stat.name : r.statId}`;
+    }).join(", ");
+    const rewardMsg = rewardsList ? ` (${rewardsList})` : "";
+    if (penaltyInfo.isLate) {
+      const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
+      const statusMsg = penaltyInfo.multiplier < 0 ? `B\u1ECB tr\u1EEB ${-Math.round(penaltyInfo.multiplier * 100)}% \u0111i\u1EC3m` : `Gi\u1EA3m ${reductionPercent}% \u0111i\u1EC3m`;
+      new import_obsidian2.Notice(`\u26A0\uFE0F Ho\xE0n th\xE0nh tr\u1EC5: ${task.text}${rewardMsg}
+${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
+    } else {
+      new import_obsidian2.Notice(`\u2705 Nhi\u1EC7m v\u1EE5 ho\xE0n th\xE0nh: ${task.text}${rewardMsg}`);
+    }
+  }
   async syncTasksFromFile(file) {
     if (this.isSyncing) {
       this.pendingSync = true;
@@ -502,13 +532,15 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
         return;
       const oldTasks = this.lastKnownContent ? parseTasks(this.lastKnownContent, this.settings.stats) : [];
       const newTasks = parseTasks(content, this.settings.stats);
+      const unprocessedOld = oldTasks.filter((t) => !t.isProcessed && t.completed);
+      const unprocessedNew = newTasks.filter((t) => !t.isProcessed && t.completed);
       const oldCounts = /* @__PURE__ */ new Map();
-      oldTasks.filter((t) => t.completed).forEach((t) => {
+      unprocessedOld.forEach((t) => {
         const key = getTaskKey(t);
         oldCounts.set(key, (oldCounts.get(key) || 0) + 1);
       });
       const newCounts = /* @__PURE__ */ new Map();
-      newTasks.filter((t) => t.completed).forEach((t) => {
+      unprocessedNew.forEach((t) => {
         const key = getTaskKey(t);
         newCounts.set(key, (newCounts.get(key) || 0) + 1);
       });
@@ -518,6 +550,8 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
       });
       const now = /* @__PURE__ */ new Date();
       let changed = false;
+      let fileContentChanged = false;
+      let currentContent = content;
       const sessionChangedKeys = /* @__PURE__ */ new Set([...oldCounts.keys(), ...newCounts.keys()]);
       for (const key of sessionChangedKeys) {
         const nOld = oldCounts.get(key) || 0;
@@ -525,7 +559,7 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
         const deltaSession = nNew - nOld;
         if (deltaSession === 0)
           continue;
-        const task = (deltaSession > 0 ? newTasks : oldTasks).find((t) => getTaskKey(t) === key && t.completed) || newTasks.find((t) => getTaskKey(t) === key) || oldTasks.find((t) => getTaskKey(t) === key);
+        const task = (deltaSession > 0 ? newTasks : oldTasks).find((t) => getTaskKey(t) === key && t.completed && !t.isProcessed);
         if (!task)
           continue;
         const penaltyInfo = this.getPenaltyInfo(task, now);
@@ -536,20 +570,9 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
               this.applyReward(task, penaltyInfo);
               this.settings.completedTasks.push(key);
               rewardedCounts.set(key, nRewarded + 1);
-              const rewardsList = task.rewards.map((r) => {
-                const stat = this.settings.stats.find((s) => s.id === r.statId);
-                const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
-                return `${finalAmount > 0 ? "+" : ""}${finalAmount} ${stat ? stat.name : r.statId}`;
-              }).join(", ");
-              const rewardMsg = rewardsList ? ` (${rewardsList})` : "";
-              if (penaltyInfo.isLate) {
-                const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
-                const statusMsg = penaltyInfo.multiplier < 0 ? `B\u1ECB tr\u1EEB ${-Math.round(penaltyInfo.multiplier * 100)}% \u0111i\u1EC3m` : `Gi\u1EA3m ${reductionPercent}% \u0111i\u1EC3m`;
-                new import_obsidian2.Notice(`\u26A0\uFE0F Ho\xE0n th\xE0nh tr\u1EC5: ${task.text}${rewardMsg}
-${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
-              } else {
-                new import_obsidian2.Notice(`\u2705 Nhi\u1EC7m v\u1EE5 ho\xE0n th\xE0nh: ${task.text}${rewardMsg}`);
-              }
+              this.showRewardNotice(task, penaltyInfo);
+              currentContent = updateTaskInContent(currentContent, task.originalLine, true, true);
+              fileContentChanged = true;
             }
           } else {
             if (nRewarded > nNew) {
@@ -564,7 +587,14 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
           changed = true;
         }
       }
-      this.lastKnownContent = content;
+      if (fileContentChanged) {
+        this.isInternalChange = true;
+        await this.app.vault.modify(file, currentContent);
+        this.lastKnownContent = currentContent;
+        this.isInternalChange = false;
+      } else {
+        this.lastKnownContent = content;
+      }
       if (changed) {
         await this.saveSettings();
       } else {

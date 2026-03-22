@@ -14,6 +14,7 @@ export interface LifeGaugeTask {
     date?: string;
     time?: string;
     isArchived: boolean;
+    isProcessed: boolean;
 }
 export function getTaskKey(task: LifeGaugeTask): string {
     const rewardsKey = (task.rewards || [])
@@ -46,6 +47,7 @@ export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
 
         const match = taskRegex.exec(line);
         if (match) {
+            const isProcessed = line.trim().endsWith('(done)');
             const completed = match[1] === 'x';
             let remainingText = match[2];
 
@@ -102,7 +104,8 @@ export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
                 skills: skills,
                 date: date,
                 time: time,
-                isArchived: isArchivedSection
+                isArchived: isArchivedSection,
+                isProcessed: isProcessed
             });
         }
     });
@@ -110,11 +113,18 @@ export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
     return tasks;
 }
 
-export function updateTaskInContent(content: string, lineIndex: number, completed: boolean): string {
+export function updateTaskInContent(content: string, lineIndex: number, completed: boolean, addDone: boolean = false): string {
     const lines = content.split('\n');
     if (lineIndex >= 0 && lineIndex < lines.length) {
-        const char = completed ? 'x' : ' ';
-        lines[lineIndex] = lines[lineIndex].replace(/\[[ x]\]/, `[${char}]`);
+        if (addDone) {
+            lines[lineIndex] = lines[lineIndex].replace(/\[[ x]\]/, `[x]`);
+            if (!lines[lineIndex].trim().endsWith('(done)')) {
+                lines[lineIndex] = lines[lineIndex].trimEnd() + ' (done)';
+            }
+        } else {
+            const char = completed ? 'x' : ' ';
+            lines[lineIndex] = lines[lineIndex].replace(/\[[ x]\]/, `[${char}]`);
+        }
     }
     return lines.join('\n');
 }

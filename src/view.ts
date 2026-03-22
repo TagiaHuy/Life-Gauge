@@ -178,7 +178,10 @@ export class LifeGaugeView extends ItemView {
 
             const checkbox = item.createEl('input', { type: 'checkbox' }) as HTMLInputElement;
             checkbox.checked = task.completed;
-            checkbox.addEventListener('change', () => this.handleTaskToggle(task, checkbox.checked));
+            checkbox.disabled = task.isProcessed;
+            if (!task.isProcessed) {
+                checkbox.addEventListener('change', () => this.handleTaskToggle(task, checkbox.checked));
+            }
 
             const textContainer = item.createEl('div', { cls: 'lg-quest-text-container' });
             textContainer.createEl('span', { text: task.text, cls: 'lg-quest-title' });
@@ -211,6 +214,8 @@ export class LifeGaugeView extends ItemView {
     }
 
     async handleTaskToggle(task: LifeGaugeTask, completed: boolean) {
+        if (task.isProcessed) return;
+
         const file = this.app.vault.getAbstractFileByPath(this.plugin.settings.taskFilePath);
         if (!(file instanceof TFile)) return;
 
@@ -218,7 +223,7 @@ export class LifeGaugeView extends ItemView {
         try {
             // 1. Update file content
             const content = await this.app.vault.read(file);
-            const newContent = updateTaskInContent(content, task.originalLine, completed);
+            const newContent = updateTaskInContent(content, task.originalLine, completed, completed);
             await this.app.vault.modify(file, newContent);
             this.plugin.lastKnownContent = newContent;
 

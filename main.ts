@@ -1,7 +1,7 @@
 import { Plugin, PluginSettingTab, App, Setting, normalizePath, TFile, Notice } from 'obsidian';
 import { LifeGaugeSettings, DEFAULT_SETTINGS, Stat, DEFAULT_STATS } from './src/data';
 import { LifeGaugeView, VIEW_TYPE_LIFE_GAUGE } from './src/view';
-import { parseTasks, getTaskKey } from './src/parser';
+import { parseTasks, getTaskKey, updateTaskInContent } from './src/parser';
 
 export default class LifeGaugePlugin extends Plugin {
     settings!: LifeGaugeSettings;
@@ -70,6 +70,23 @@ export default class LifeGaugePlugin extends Plugin {
         });
     }
 
+    showRewardNotice(task: any, penaltyInfo: { multiplier: number, isLate: boolean, minutesLate: number }) {
+        const rewardsList = task.rewards.map((r: any) => {
+            const stat = this.settings.stats.find(s => s.id === r.statId);
+            const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
+            return `${finalAmount > 0 ? '+' : ''}${finalAmount} ${stat ? stat.name : r.statId}`;
+        }).join(', ');
+        const rewardMsg = rewardsList ? ` (${rewardsList})` : '';
+
+        if (penaltyInfo.isLate) {
+            const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
+            const statusMsg = penaltyInfo.multiplier < 0 ? `Bị trừ ${-Math.round(penaltyInfo.multiplier * 100)}% điểm` : `Giảm ${reductionPercent}% điểm`;
+            new Notice(`⚠️ Hoàn thành trễ: ${task.text}${rewardMsg}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
+        } else {
+            new Notice(`✅ Nhiệm vụ hoàn thành: ${task.text}${rewardMsg}`);
+        }
+    }
+
     async syncTasksFromFile(file: TFile) {
         if (this.isSyncing) {
             this.pendingSync = true;
@@ -85,14 +102,19 @@ export default class LifeGaugePlugin extends Plugin {
             const oldTasks = this.lastKnownContent ? parseTasks(this.lastKnownContent, this.settings.stats) : [];
             const newTasks = parseTasks(content, this.settings.stats);
             
+            // Only consider tasks that are NOT processed (don't have " (done)")
+            // User requested: "mặc định bỏ qua những task có kí tự (done) cho dù nó có được check hay ko"
+            const unprocessedOld = oldTasks.filter(t => !t.isProcessed && t.completed);
+            const unprocessedNew = newTasks.filter(t => !t.isProcessed && t.completed);
+
             const oldCounts = new Map<string, number>();
-            oldTasks.filter(t => t.completed).forEach(t => {
+            unprocessedOld.forEach(t => {
                 const key = getTaskKey(t);
                 oldCounts.set(key, (oldCounts.get(key) || 0) + 1);
             });
 
             const newCounts = new Map<string, number>();
-            newTasks.filter(t => t.completed).forEach(t => {
+            unprocessedNew.forEach(t => {
                 const key = getTaskKey(t);
                 newCounts.set(key, (newCounts.get(key) || 0) + 1);
             });
@@ -105,6 +127,8 @@ export default class LifeGaugePlugin extends Plugin {
 
             const now = new Date();
             let changed = false;
+            let fileContentChanged = false;
+            let currentContent = content;
 
             // 3. Find unique keys that changed in this session
             const sessionChangedKeys = new Set([...oldCounts.keys(), ...newCounts.keys()]);
@@ -117,10 +141,7 @@ export default class LifeGaugePlugin extends Plugin {
                 if (deltaSession === 0) continue;
 
                 // Find a task object to get rewards/metadata
-                const task = (deltaSession > 0 ? newTasks : oldTasks).find(t => getTaskKey(t) === key && t.completed)
-                             || newTasks.find(t => getTaskKey(t) === key)
-                             || oldTasks.find(t => getTaskKey(t) === key);
-                
+                const task = (deltaSession > 0 ? newTasks : oldTasks).find(t => getTaskKey(t) === key && t.completed && !t.isProcessed);
                 if (!task) continue;
 
                 const penaltyInfo = this.getPenaltyInfo(task, now);
@@ -135,21 +156,11 @@ export default class LifeGaugePlugin extends Plugin {
                             this.applyReward(task, penaltyInfo);
                             this.settings.completedTasks.push(key);
                             rewardedCounts.set(key, nRewarded + 1);
+                            this.showRewardNotice(task, penaltyInfo);
                             
-                            const rewardsList = task.rewards.map((r: any) => {
-                                const stat = this.settings.stats.find(s => s.id === r.statId);
-                                const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
-                                return `${finalAmount > 0 ? '+' : ''}${finalAmount} ${stat ? stat.name : r.statId}`;
-                            }).join(', ');
-                            const rewardMsg = rewardsList ? ` (${rewardsList})` : '';
-
-                            if (penaltyInfo.isLate) {
-                                const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
-                                const statusMsg = penaltyInfo.multiplier < 0 ? `Bị trừ ${-Math.round(penaltyInfo.multiplier * 100)}% điểm` : `Giảm ${reductionPercent}% điểm`;
-                                new Notice(`⚠️ Hoàn thành trễ: ${task.text}${rewardMsg}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
-                            } else {
-                                new Notice(`✅ Nhiệm vụ hoàn thành: ${task.text}${rewardMsg}`);
-                            }
+                            // Mark as (done) in file
+                            currentContent = updateTaskInContent(currentContent, task.originalLine, true, true);
+                            fileContentChanged = true;
                         }
                     } else {
                         // Newly unchecked in session
@@ -167,7 +178,14 @@ export default class LifeGaugePlugin extends Plugin {
                 }
             }
 
-            this.lastKnownContent = content;
+            if (fileContentChanged) {
+                this.isInternalChange = true;
+                await this.app.vault.modify(file, currentContent);
+                this.lastKnownContent = currentContent;
+                this.isInternalChange = false;
+            } else {
+                this.lastKnownContent = content;
+            }
 
             if (changed) {
                 await this.saveSettings();
