@@ -1,4 +1,4 @@
-import { Plugin, PluginSettingTab, App, Setting, normalizePath, TFile, Notice } from 'obsidian';
+import { Plugin, PluginSettingTab, App, Setting, normalizePath, TFile, Notice, Modal } from 'obsidian';
 import { LifeGaugeSettings, DEFAULT_SETTINGS, Stat, DEFAULT_STATS, getCurrentTitle, calculateLevel } from './src/data';
 import { LifeGaugeView, VIEW_TYPE_LIFE_GAUGE } from './src/view';
 import { parseTasks, getTaskKey, updateTaskInContent } from './src/parser';
@@ -343,6 +343,83 @@ export default class LifeGaugePlugin extends Plugin {
             }
         });
     }
+
+    showAddRewardModal() {
+        new AddRewardModal(this.app, this).open();
+    }
+}
+
+class AddRewardModal extends Modal {
+    plugin: LifeGaugePlugin;
+    name: string = "Món quà mới";
+    icon: string = "🎁";
+    description: string = "";
+    cost: number = 50;
+
+    constructor(app: App, plugin: LifeGaugePlugin) {
+        super(app);
+        this.plugin = plugin;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl("h2", { text: "Thêm phần thưởng tự chọn" });
+
+        new Setting(contentEl)
+            .setName("Tên phần thưởng")
+            .addText((text) =>
+                text.setValue(this.name).onChange((value) => {
+                    this.name = value;
+                })
+            );
+
+        new Setting(contentEl)
+            .setName("Biểu tượng (Icon)")
+            .addText((text) =>
+                text.setValue(this.icon).onChange((value) => {
+                    this.icon = value || "🎁";
+                })
+            );
+
+        new Setting(contentEl)
+            .setName("Mô tả")
+            .addText((text) =>
+                text.setValue(this.description).onChange((value) => {
+                    this.description = value;
+                })
+            );
+
+        new Setting(contentEl)
+            .setName("Giá (Coin)")
+            .addText((text) =>
+                text.setValue(this.cost.toString()).onChange((value) => {
+                    const val = parseInt(value);
+                    if (!isNaN(val)) this.cost = val;
+                })
+            );
+
+        new Setting(contentEl).addButton((btn) =>
+            btn
+                .setButtonText("Thêm vào Shop")
+                .setCta()
+                .onClick(async () => {
+                    this.plugin.settings.customShopItems.push({
+                        id: `item-${Date.now()}`,
+                        name: this.name,
+                        icon: this.icon,
+                        description: this.description,
+                        cost: this.cost,
+                    });
+                    await this.plugin.saveSettings();
+                    this.close();
+                })
+        );
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
+    }
 }
 
 class LifeGaugeSettingTab extends PluginSettingTab {
@@ -615,6 +692,85 @@ class LifeGaugeSettingTab extends PluginSettingTab {
                         name: 'Danh hiệu mới',
                         icon: '🆕',
                         description: 'Mô tả về danh hiệu này...'
+                    });
+                    await this.plugin.saveSettings();
+                    this.display();
+                }));
+
+        const customShopItemsDetails = containerEl.createEl('details', { cls: 'lg-settings-details' });
+        const customShopItemsSummary = customShopItemsDetails.createEl('summary');
+        customShopItemsSummary.createEl('h3', { text: '🎁 Cửa hàng vật phẩm tự chọn', cls: 'lg-settings-summary-title' });
+
+        this.plugin.settings.customShopItems.forEach((item, index) => {
+            const itemHeader = customShopItemsDetails.createEl('div', { cls: 'lg-setting-stat-header' });
+            itemHeader.style.display = 'flex';
+            itemHeader.style.justifyContent = 'space-between';
+            itemHeader.style.alignItems = 'center';
+            
+            const itemTitle = itemHeader.createEl('h4', { text: item.name });
+            itemTitle.style.margin = '0';
+            
+            const deleteBtn = itemHeader.createEl('button', { text: 'Xóa', cls: 'mod-warning' });
+            deleteBtn.addEventListener('click', async () => {
+                this.plugin.settings.customShopItems.splice(index, 1);
+                await this.plugin.saveSettings();
+                this.display();
+            });
+
+            new Setting(customShopItemsDetails)
+                .setName('Tên vật phẩm')
+                .addText(text => text
+                    .setValue(item.name)
+                    .onChange(async (value) => {
+                        this.plugin.settings.customShopItems[index].name = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(customShopItemsDetails)
+                .setName('Biểu tượng (Icon)')
+                .addText(text => text
+                    .setValue(item.icon)
+                    .setPlaceholder('🎁')
+                    .onChange(async (value) => {
+                        this.plugin.settings.customShopItems[index].icon = value || '🎁';
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(customShopItemsDetails)
+                .setName('Mô tả')
+                .addText(text => text
+                    .setValue(item.description)
+                    .onChange(async (value) => {
+                        this.plugin.settings.customShopItems[index].description = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(customShopItemsDetails)
+                .setName('Giá (Coin)')
+                .addText(text => text
+                    .setValue(item.cost.toString())
+                    .onChange(async (value) => {
+                        const val = parseInt(value);
+                        if (!isNaN(val)) {
+                            this.plugin.settings.customShopItems[index].cost = val;
+                            await this.plugin.saveSettings();
+                        }
+                    }));
+            
+            customShopItemsDetails.createEl('hr');
+        });
+
+        new Setting(customShopItemsDetails)
+            .setName('Thêm vật phẩm mới')
+            .addButton(btn => btn
+                .setButtonText('Thêm Vật phẩm')
+                .onClick(async () => {
+                    this.plugin.settings.customShopItems.push({
+                        id: `item-${Date.now()}`,
+                        name: 'Phần thưởng mới',
+                        icon: '🎁',
+                        description: 'Mô tả phần thưởng...',
+                        cost: 50
                     });
                     await this.plugin.saveSettings();
                     this.display();

@@ -16,6 +16,13 @@ export interface Title {
     icon: string;
     description: string;
 }
+export interface CustomShopItem {
+    id: string;
+    name: string;
+    icon: string;
+    description: string;
+    cost: number;
+}
 
 export interface LifeGaugeSettings {
     avatarPath: string;
@@ -30,6 +37,7 @@ export interface LifeGaugeSettings {
     maxHunger: number;
     coins: number;
     lastHungerUpdate: number;
+    customShopItems: CustomShopItem[];
 }
 
 export const DEFAULT_STATS: Stat[] = [
@@ -116,7 +124,8 @@ export const DEFAULT_SETTINGS: LifeGaugeSettings = {
     hunger: 100,
     maxHunger: 100,
     coins: 0,
-    lastHungerUpdate: Date.now()
+    lastHungerUpdate: Date.now(),
+    customShopItems: []
 };
 
 export function getRequiredXp(level: number, baseXp: number, xpIncrement: number): number {

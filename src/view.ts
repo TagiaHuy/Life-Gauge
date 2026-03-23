@@ -157,8 +157,13 @@ export class LifeGaugeView extends ItemView {
     }
 
     showShop = false;
+    purchasedItemIds = new Set<string>();
+
     toggleShop() {
         this.showShop = !this.showShop;
+        if (!this.showShop) {
+            this.purchasedItemIds.clear();
+        }
         this.update();
     }
 
@@ -204,6 +209,56 @@ export class LifeGaugeView extends ItemView {
                 }
             });
         });
+
+        // --- Custom Rewards Section ---
+        const customHeader = shopContainer.createEl('div', { cls: 'lg-shop-section-header' });
+        customHeader.createEl('h3', { text: '🎁 Phần thưởng tự chọn', cls: 'lg-shop-section-title' });
+        
+        const addBtn = customHeader.createEl('button', { text: '➕', cls: 'lg-add-reward-btn' });
+        addBtn.setAttr('title', 'Thêm phần thưởng mới');
+        addBtn.addEventListener('click', () => {
+            // We'll call a method on the plugin to show the modal
+            (this.plugin as any).showAddRewardModal();
+        });
+
+        if (this.plugin.settings.customShopItems.length > 0) {
+            const customGrid = shopContainer.createEl('div', { cls: 'lg-shop-grid' });
+
+            this.plugin.settings.customShopItems.forEach(item => {
+                const isPurchased = this.purchasedItemIds.has(item.id);
+                const card = customGrid.createEl('div', { cls: `lg-shop-card custom-reward ${isPurchased ? 'lg-purchased-item' : ''}` });
+                
+                if (isPurchased) {
+                    card.createEl('div', { text: '✅ Đã nhận', cls: 'lg-purchased-badge' });
+                }
+
+                card.createEl('div', { text: item.icon || '🎁', cls: 'lg-shop-item-icon' });
+                card.createEl('div', { text: item.name, cls: 'lg-shop-item-name' });
+                card.createEl('div', { text: item.description, cls: 'lg-shop-item-desc' });
+                
+                const buyBtn = card.createEl('button', { 
+                    text: isPurchased ? 'Dùng thêm' : `${item.cost} 💰 Nhận`, 
+                    cls: `lg-buy-btn ${isPurchased ? 'is-purchased' : ''}` 
+                });
+                
+                if (this.plugin.settings.coins < item.cost) {
+                    buyBtn.setAttr('disabled', true);
+                    buyBtn.addClass('is-disabled');
+                }
+
+                buyBtn.addEventListener('click', async () => {
+                    if (this.plugin.settings.coins >= item.cost) {
+                        this.plugin.settings.coins -= item.cost;
+                        this.purchasedItemIds.add(item.id);
+                        new Notice(`🎉 Chúc mừng! Bạn đã nhận phần thưởng: ${item.name}`);
+                        await this.plugin.saveSettings();
+                        this.update();
+                    }
+                });
+            });
+        } else {
+            shopContainer.createEl('div', { text: 'Chưa có vật phẩm tự chọn. Nhấn + để thêm!', cls: 'lg-no-items' });
+        }
     }
 
     renderStats(parent: HTMLElement) {
