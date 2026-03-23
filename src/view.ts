@@ -157,8 +157,13 @@ export class LifeGaugeView extends ItemView {
     }
 
     showShop = false;
+    purchasedItemIds = new Set<string>();
+
     toggleShop() {
         this.showShop = !this.showShop;
+        if (!this.showShop) {
+            this.purchasedItemIds.clear();
+        }
         this.update();
     }
 
@@ -204,6 +209,56 @@ export class LifeGaugeView extends ItemView {
                 }
             });
         });
+
+        // --- Custom Rewards Section ---
+        const customHeader = shopContainer.createEl('div', { cls: 'lg-shop-section-header' });
+        customHeader.createEl('h3', { text: '🎁 Phần thưởng tự chọn', cls: 'lg-shop-section-title' });
+        
+        const addBtn = customHeader.createEl('button', { text: '➕', cls: 'lg-add-reward-btn' });
+        addBtn.setAttr('title', 'Thêm phần thưởng mới');
+        addBtn.addEventListener('click', () => {
+            // We'll call a method on the plugin to show the modal
+            (this.plugin as any).showAddRewardModal();
+        });
+
+        if (this.plugin.settings.customShopItems.length > 0) {
+            const customGrid = shopContainer.createEl('div', { cls: 'lg-shop-grid' });
+
+            this.plugin.settings.customShopItems.forEach(item => {
+                const isPurchased = this.purchasedItemIds.has(item.id);
+                const card = customGrid.createEl('div', { cls: `lg-shop-card custom-reward ${isPurchased ? 'lg-purchased-item' : ''}` });
+                
+                if (isPurchased) {
+                    card.createEl('div', { text: '✅ Đã nhận', cls: 'lg-purchased-badge' });
+                }
+
+                card.createEl('div', { text: item.icon || '🎁', cls: 'lg-shop-item-icon' });
+                card.createEl('div', { text: item.name, cls: 'lg-shop-item-name' });
+                card.createEl('div', { text: item.description, cls: 'lg-shop-item-desc' });
+                
+                const buyBtn = card.createEl('button', { 
+                    text: isPurchased ? 'Dùng thêm' : `${item.cost} 💰 Nhận`, 
+                    cls: `lg-buy-btn ${isPurchased ? 'is-purchased' : ''}` 
+                });
+                
+                if (this.plugin.settings.coins < item.cost) {
+                    buyBtn.setAttr('disabled', true);
+                    buyBtn.addClass('is-disabled');
+                }
+
+                buyBtn.addEventListener('click', async () => {
+                    if (this.plugin.settings.coins >= item.cost) {
+                        this.plugin.settings.coins -= item.cost;
+                        this.purchasedItemIds.add(item.id);
+                        new Notice(`🎉 Chúc mừng! Bạn đã nhận phần thưởng: ${item.name}`);
+                        await this.plugin.saveSettings();
+                        this.update();
+                    }
+                });
+            });
+        } else {
+            shopContainer.createEl('div', { text: 'Chưa có vật phẩm tự chọn. Nhấn + để thêm!', cls: 'lg-no-items' });
+        }
     }
 
     renderStats(parent: HTMLElement) {
@@ -287,7 +342,7 @@ export class LifeGaugeView extends ItemView {
 
                 // Rewards
                 if (task.rewards.length > 0) {
-                    const rewardsText = task.rewards.map(r => {
+                    let rewardsText = task.rewards.map(r => {
                         const stat = this.plugin.settings.stats.find(s => s.id === r.statId);
                         const label = stat ? stat.name : r.statId;
                         if (task.isProcessed && r.earnedAmount !== undefined) {
@@ -295,6 +350,10 @@ export class LifeGaugeView extends ItemView {
                         }
                         return label;
                     }).join(', ');
+
+                    if (task.isProcessed && task.earnedCoins !== undefined) {
+                        rewardsText += ` +💰 ${task.earnedCoins} coin`;
+                    }
                     meta.createEl('span', { text: `(${rewardsText})`, cls: 'lg-reward-text' });
                 }
 
@@ -321,12 +380,6 @@ export class LifeGaugeView extends ItemView {
 
         this.plugin.isInternalChange = true;
         try {
-            // 1. Update file content
-            const content = await this.app.vault.read(file);
-            const newContent = updateTaskInContent(content, task.originalLine, completed, completed);
-            await this.app.vault.modify(file, newContent);
-            this.plugin.lastKnownContent = newContent;
-
             // 2. Capture old state for rank up check
             const oldTotalXp = getTotalXp(this.plugin.settings.stats);
             const currentTitle = getCurrentTitle(oldTotalXp, this.plugin.settings.titles);
@@ -336,9 +389,12 @@ export class LifeGaugeView extends ItemView {
             const now = new Date();
             const penaltyInfo = this.plugin.getPenaltyInfo(task, now);
 
+            let rewardString = "";
             if (completed) {
                 const coins = this.plugin.applyReward(task, penaltyInfo);
+                task.earnedCoins = coins;
                 this.plugin.settings.completedTasks.push(taskId);
+                rewardString = this.plugin.getRewardString(task, coins);
                 
                 const rewardsList = task.rewards.map(r => {
                     const stat = this.plugin.settings.stats.find(s => s.id === r.statId);
@@ -362,6 +418,12 @@ export class LifeGaugeView extends ItemView {
                     this.plugin.settings.completedTasks.splice(index, 1);
                 }
             }
+
+            // 1. Update file content
+            const content = await this.app.vault.read(file);
+            const newContent = updateTaskInContent(content, task.originalLine, completed, completed, rewardString);
+            await this.app.vault.modify(file, newContent);
+            this.plugin.lastKnownContent = newContent;
 
             await this.plugin.saveSettings(); // This will call refreshViews() and thus update()
 

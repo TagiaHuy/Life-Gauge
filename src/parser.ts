@@ -17,6 +17,7 @@ export interface LifeGaugeTask {
     isArchived: boolean;
     isProcessed: boolean;
     occurrenceIndex: number;
+    earnedCoins?: number;
 }
 export function getTaskKey(task: LifeGaugeTask): string {
     const statsKey = (task.rewards || [])
@@ -107,7 +108,7 @@ export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
             occurrenceMap.set(baseKey, occurrenceIndex + 1);
 
             // Store task
-            tasks.push({
+            const task: LifeGaugeTask = {
                 originalLine: index,
                 text: remainingText,
                 completed: completed,
@@ -118,20 +119,49 @@ export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
                 isArchived: isArchivedSection,
                 isProcessed: isProcessed,
                 occurrenceIndex: occurrenceIndex
-            });
+            };
+
+            // 5. Look ahead for rewards if processed
+            if (isProcessed && index + 1 < lines.length) {
+                const nextLine = lines[index + 1];
+                const coinMatch = /\+💰\s*(\d+)/.exec(nextLine);
+                if (coinMatch) {
+                    task.earnedCoins = parseInt(coinMatch[1]);
+                }
+                
+                task.rewards.forEach(r => {
+                    const stat = stats.find(s => s.id === r.statId);
+                    if (stat) {
+                        const xpRegex = new RegExp(`\\+([\\d.]+)\\s+${stat.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i');
+                        const xpMatch = xpRegex.exec(nextLine);
+                        if (xpMatch) {
+                            r.earnedAmount = parseFloat(xpMatch[1]);
+                        }
+                    }
+                });
+            }
+
+            tasks.push(task);
         }
     });
 
     return tasks;
 }
 
-export function updateTaskInContent(content: string, lineIndex: number, completed: boolean, addDone: boolean = false): string {
+export function updateTaskInContent(content: string, lineIndex: number, completed: boolean, addDone: boolean = false, rewardText?: string): string {
     const lines = content.split('\n');
     if (lineIndex >= 0 && lineIndex < lines.length) {
         if (addDone) {
             lines[lineIndex] = lines[lineIndex].replace(/\[[ x]\]/, `[x]`);
             if (!lines[lineIndex].trim().endsWith('(done)')) {
                 lines[lineIndex] = lines[lineIndex].trimEnd() + ' (done)';
+            }
+            if (rewardText) {
+                // Get indentation of the task line
+                const indentMatch = lines[lineIndex].match(/^(\s*)/);
+                const indent = indentMatch ? indentMatch[1] : '';
+                // Append reward on a new line with double indentation
+                lines[lineIndex] = lines[lineIndex] + `\n${indent}  ${rewardText}`;
             }
         } else {
             const char = completed ? 'x' : ' ';

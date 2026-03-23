@@ -408,7 +408,7 @@
     font-style: italic;
 }
 
-.lg-no-tasks {
+.lg-no-tasks, .lg-no-items {
     color: var(--text-faint);
     text-align: center;
     padding: 20px;
@@ -423,6 +423,40 @@
 
 .lg-nickname-update {
     animation: rank-up 0.5s ease-out;
+}
+
+/* Purchased Item Effect */
+@keyframes lg-pulse-gold {
+    0% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0.4); }
+    70% { box-shadow: 0 0 0 10px rgba(255, 215, 0, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 215, 0, 0); }
+}
+
+.lg-purchased-item {
+    border: 2px solid #ffd700 !important;
+    background: linear-gradient(135deg, var(--background-secondary-alt), rgba(255, 215, 0, 0.1)) !important;
+    animation: lg-pulse-gold 2s infinite;
+    position: relative;
+    transform: scale(1.02);
+}
+
+.lg-purchased-badge {
+    position: absolute;
+    top: -10px;
+    right: -10px;
+    background: #ffd700;
+    color: #000;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 0.75em;
+    font-weight: bold;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+    z-index: 10;
+}
+
+.lg-buy-btn.is-purchased {
+    background-color: var(--background-modifier-success) !important;
+    color: white !important;
 }
 
 /* Settings Collapsible Sections */
@@ -470,4 +504,48 @@
 .lg-settings-details[open] summary::before {
     transform: rotate(90deg);
     color: var(--interactive-accent);
+}
+
+/* Custom Shop Items */
+.lg-shop-section-title {
+    margin: 0;
+    font-size: 1.1em;
+    border-bottom: 2px solid var(--interactive-accent);
+    padding-bottom: 5px;
+    width: fit-content;
+}
+
+.lg-shop-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 20px;
+    margin-bottom: 10px;
+}
+
+.lg-add-reward-btn {
+    border: none;
+    background: none;
+    cursor: pointer;
+    font-size: 1.2em;
+    padding: 0 10px;
+    opacity: 0.6;
+    transition: opacity 0.2s, transform 0.2s;
+}
+
+.lg-add-reward-btn:hover {
+    opacity: 1;
+    transform: scale(1.2);
+}
+
+.lg-shop-item-desc {
+    font-size: 0.85em;
+    opacity: 0.7;
+    margin-bottom: 10px;
+    font-style: italic;
+}
+
+.lg-shop-card.custom-reward {
+    border: 1px dashed var(--interactive-accent);
+    background: var(--background-secondary-alt);
 }

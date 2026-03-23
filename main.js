@@ -118,7 +118,8 @@ var DEFAULT_SETTINGS = {
   hunger: 100,
   maxHunger: 100,
   coins: 0,
-  lastHungerUpdate: Date.now()
+  lastHungerUpdate: Date.now(),
+  customShopItems: []
 };
 function calculateLevel(currentXp, baseXp, xpIncrement) {
   let level = 1;
@@ -211,7 +212,7 @@ function parseTasks(content, stats) {
       const baseKey = `${remainingText}:${rewards.map((r) => r.statId).sort().join(",")}:${date || ""}:${time || ""}`;
       const occurrenceIndex = occurrenceMap.get(baseKey) || 0;
       occurrenceMap.set(baseKey, occurrenceIndex + 1);
-      tasks.push({
+      const task = {
         originalLine: index,
         text: remainingText,
         completed,
@@ -222,18 +223,42 @@ function parseTasks(content, stats) {
         isArchived: isArchivedSection,
         isProcessed,
         occurrenceIndex
-      });
+      };
+      if (isProcessed && index + 1 < lines.length) {
+        const nextLine = lines[index + 1];
+        const coinMatch = /\+💰\s*(\d+)/.exec(nextLine);
+        if (coinMatch) {
+          task.earnedCoins = parseInt(coinMatch[1]);
+        }
+        task.rewards.forEach((r) => {
+          const stat = stats.find((s) => s.id === r.statId);
+          if (stat) {
+            const xpRegex = new RegExp(`\\+([\\d.]+)\\s+${stat.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
+            const xpMatch = xpRegex.exec(nextLine);
+            if (xpMatch) {
+              r.earnedAmount = parseFloat(xpMatch[1]);
+            }
+          }
+        });
+      }
+      tasks.push(task);
     }
   });
   return tasks;
 }
-function updateTaskInContent(content, lineIndex, completed, addDone = false) {
+function updateTaskInContent(content, lineIndex, completed, addDone = false, rewardText) {
   const lines = content.split("\n");
   if (lineIndex >= 0 && lineIndex < lines.length) {
     if (addDone) {
       lines[lineIndex] = lines[lineIndex].replace(/\[[ x]\]/, `[x]`);
       if (!lines[lineIndex].trim().endsWith("(done)")) {
         lines[lineIndex] = lines[lineIndex].trimEnd() + " (done)";
+      }
+      if (rewardText) {
+        const indentMatch = lines[lineIndex].match(/^(\s*)/);
+        const indent = indentMatch ? indentMatch[1] : "";
+        lines[lineIndex] = lines[lineIndex] + `
+${indent}  ${rewardText}`;
       }
     } else {
       const char = completed ? "x" : " ";
@@ -252,6 +277,7 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     __publicField(this, "tasks", []);
     __publicField(this, "isUpdating", false);
     __publicField(this, "showShop", false);
+    __publicField(this, "purchasedItemIds", /* @__PURE__ */ new Set());
     this.plugin = plugin;
   }
   getViewType() {
@@ -354,6 +380,9 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
   }
   toggleShop() {
     this.showShop = !this.showShop;
+    if (!this.showShop) {
+      this.purchasedItemIds.clear();
+    }
     this.update();
   }
   renderShop(parent) {
@@ -391,6 +420,45 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
         }
       });
     });
+    const customHeader = shopContainer.createEl("div", { cls: "lg-shop-section-header" });
+    customHeader.createEl("h3", { text: "\u{1F381} Ph\u1EA7n th\u01B0\u1EDFng t\u1EF1 ch\u1ECDn", cls: "lg-shop-section-title" });
+    const addBtn = customHeader.createEl("button", { text: "\u2795", cls: "lg-add-reward-btn" });
+    addBtn.setAttr("title", "Th\xEAm ph\u1EA7n th\u01B0\u1EDFng m\u1EDBi");
+    addBtn.addEventListener("click", () => {
+      this.plugin.showAddRewardModal();
+    });
+    if (this.plugin.settings.customShopItems.length > 0) {
+      const customGrid = shopContainer.createEl("div", { cls: "lg-shop-grid" });
+      this.plugin.settings.customShopItems.forEach((item) => {
+        const isPurchased = this.purchasedItemIds.has(item.id);
+        const card = customGrid.createEl("div", { cls: `lg-shop-card custom-reward ${isPurchased ? "lg-purchased-item" : ""}` });
+        if (isPurchased) {
+          card.createEl("div", { text: "\u2705 \u0110\xE3 nh\u1EADn", cls: "lg-purchased-badge" });
+        }
+        card.createEl("div", { text: item.icon || "\u{1F381}", cls: "lg-shop-item-icon" });
+        card.createEl("div", { text: item.name, cls: "lg-shop-item-name" });
+        card.createEl("div", { text: item.description, cls: "lg-shop-item-desc" });
+        const buyBtn = card.createEl("button", {
+          text: isPurchased ? "D\xF9ng th\xEAm" : `${item.cost} \u{1F4B0} Nh\u1EADn`,
+          cls: `lg-buy-btn ${isPurchased ? "is-purchased" : ""}`
+        });
+        if (this.plugin.settings.coins < item.cost) {
+          buyBtn.setAttr("disabled", true);
+          buyBtn.addClass("is-disabled");
+        }
+        buyBtn.addEventListener("click", async () => {
+          if (this.plugin.settings.coins >= item.cost) {
+            this.plugin.settings.coins -= item.cost;
+            this.purchasedItemIds.add(item.id);
+            new import_obsidian.Notice(`\u{1F389} Ch\xFAc m\u1EEBng! B\u1EA1n \u0111\xE3 nh\u1EADn ph\u1EA7n th\u01B0\u1EDFng: ${item.name}`);
+            await this.plugin.saveSettings();
+            this.update();
+          }
+        });
+      });
+    } else {
+      shopContainer.createEl("div", { text: "Ch\u01B0a c\xF3 v\u1EADt ph\u1EA9m t\u1EF1 ch\u1ECDn. Nh\u1EA5n + \u0111\u1EC3 th\xEAm!", cls: "lg-no-items" });
+    }
   }
   renderStats(parent) {
     const statsContainer = parent.createEl("div", { cls: "lg-stats-container" });
@@ -449,7 +517,7 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       if (task.rewards.length > 0 || task.skills.length > 0 || task.date || task.time) {
         const meta = textContainer.createEl("div", { cls: "lg-quest-meta" });
         if (task.rewards.length > 0) {
-          const rewardsText = task.rewards.map((r) => {
+          let rewardsText = task.rewards.map((r) => {
             const stat = this.plugin.settings.stats.find((s) => s.id === r.statId);
             const label = stat ? stat.name : r.statId;
             if (task.isProcessed && r.earnedAmount !== void 0) {
@@ -457,6 +525,9 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
             }
             return label;
           }).join(", ");
+          if (task.isProcessed && task.earnedCoins !== void 0) {
+            rewardsText += ` +\u{1F4B0} ${task.earnedCoins} coin`;
+          }
           meta.createEl("span", { text: `(${rewardsText})`, cls: "lg-reward-text" });
         }
         if (task.date || task.time) {
@@ -478,18 +549,17 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       return;
     this.plugin.isInternalChange = true;
     try {
-      const content = await this.app.vault.read(file);
-      const newContent = updateTaskInContent(content, task.originalLine, completed, completed);
-      await this.app.vault.modify(file, newContent);
-      this.plugin.lastKnownContent = newContent;
       const oldTotalXp = getTotalXp(this.plugin.settings.stats);
       const currentTitle = getCurrentTitle(oldTotalXp, this.plugin.settings.titles);
       const taskId = getTaskKey(task);
       const now = /* @__PURE__ */ new Date();
       const penaltyInfo = this.plugin.getPenaltyInfo(task, now);
+      let rewardString = "";
       if (completed) {
         const coins = this.plugin.applyReward(task, penaltyInfo);
+        task.earnedCoins = coins;
         this.plugin.settings.completedTasks.push(taskId);
+        rewardString = this.plugin.getRewardString(task, coins);
         const rewardsList = task.rewards.map((r) => {
           const stat = this.plugin.settings.stats.find((s) => s.id === r.statId);
           const finalAmount = r.earnedAmount || 0;
@@ -512,6 +582,10 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
           this.plugin.settings.completedTasks.splice(index, 1);
         }
       }
+      const content = await this.app.vault.read(file);
+      const newContent = updateTaskInContent(content, task.originalLine, completed, completed, rewardString);
+      await this.app.vault.modify(file, newContent);
+      this.plugin.lastKnownContent = newContent;
       await this.plugin.saveSettings();
       const newTotalXp = getTotalXp(this.plugin.settings.stats);
       const newTitle = getCurrentTitle(newTotalXp, this.plugin.settings.titles);
@@ -659,6 +733,14 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
       }
     });
   }
+  getRewardString(task, coins) {
+    const rewardsList = task.rewards.map((r) => {
+      const stat = this.settings.stats.find((s) => s.id === r.statId);
+      const finalAmount = r.earnedAmount || 0;
+      return `${finalAmount > 0 ? "+" : ""}${finalAmount} ${stat ? stat.name : r.statId}`;
+    }).join(" ");
+    return `${rewardsList} +\u{1F4B0} ${coins} coin`.trim();
+  }
   showRewardNotice(task, penaltyInfo) {
     const rewardsList = task.rewards.map((r) => {
       const stat = this.settings.stats.find((s) => s.id === r.statId);
@@ -697,6 +779,7 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
       const newlyCompleted = newTasks.filter((t) => t.completed && !t.isProcessed);
       for (const task of newlyCompleted) {
         const key = getTaskKey(task);
+        let rewardString = "";
         if (!this.settings.completedTasks.includes(key)) {
           const penaltyInfo = this.getPenaltyInfo(task, now);
           const oldTotalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
@@ -705,6 +788,7 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
           task.earnedCoins = coins;
           this.settings.completedTasks.push(key);
           this.showRewardNotice(task, penaltyInfo);
+          rewardString = this.getRewardString(task, coins);
           const newTotalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
           const newTitle = getCurrentTitle(newTotalXp, this.settings.titles);
           if (newTitle.name !== oldTitle.name) {
@@ -716,7 +800,7 @@ Max Satiety +50!`, 5e3);
           }
           changed = true;
         }
-        currentContent = updateTaskInContent(currentContent, task.originalLine, true, true);
+        currentContent = updateTaskInContent(currentContent, task.originalLine, true, true, rewardString);
         fileContentChanged = true;
       }
       const unprocessedOld = oldTasks.filter((t) => t.completed && !t.isProcessed);
@@ -807,6 +891,63 @@ Max Satiety +50!`, 5e3);
         leaf.view.update();
       }
     });
+  }
+  showAddRewardModal() {
+    new AddRewardModal(this.app, this).open();
+  }
+};
+var AddRewardModal = class extends import_obsidian2.Modal {
+  constructor(app, plugin) {
+    super(app);
+    __publicField(this, "plugin");
+    __publicField(this, "name", "M\xF3n qu\xE0 m\u1EDBi");
+    __publicField(this, "icon", "\u{1F381}");
+    __publicField(this, "description", "");
+    __publicField(this, "cost", 50);
+    this.plugin = plugin;
+  }
+  onOpen() {
+    const { contentEl } = this;
+    contentEl.createEl("h2", { text: "Th\xEAm ph\u1EA7n th\u01B0\u1EDFng t\u1EF1 ch\u1ECDn" });
+    new import_obsidian2.Setting(contentEl).setName("T\xEAn ph\u1EA7n th\u01B0\u1EDFng").addText(
+      (text) => text.setValue(this.name).onChange((value) => {
+        this.name = value;
+      })
+    );
+    new import_obsidian2.Setting(contentEl).setName("Bi\u1EC3u t\u01B0\u1EE3ng (Icon)").addText(
+      (text) => text.setValue(this.icon).onChange((value) => {
+        this.icon = value || "\u{1F381}";
+      })
+    );
+    new import_obsidian2.Setting(contentEl).setName("M\xF4 t\u1EA3").addText(
+      (text) => text.setValue(this.description).onChange((value) => {
+        this.description = value;
+      })
+    );
+    new import_obsidian2.Setting(contentEl).setName("Gi\xE1 (Coin)").addText(
+      (text) => text.setValue(this.cost.toString()).onChange((value) => {
+        const val = parseInt(value);
+        if (!isNaN(val))
+          this.cost = val;
+      })
+    );
+    new import_obsidian2.Setting(contentEl).addButton(
+      (btn) => btn.setButtonText("Th\xEAm v\xE0o Shop").setCta().onClick(async () => {
+        this.plugin.settings.customShopItems.push({
+          id: `item-${Date.now()}`,
+          name: this.name,
+          icon: this.icon,
+          description: this.description,
+          cost: this.cost
+        });
+        await this.plugin.saveSettings();
+        this.close();
+      })
+    );
+  }
+  onClose() {
+    const { contentEl } = this;
+    contentEl.empty();
   }
 };
 var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
@@ -972,6 +1113,54 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
         name: "Danh hi\u1EC7u m\u1EDBi",
         icon: "\u{1F195}",
         description: "M\xF4 t\u1EA3 v\u1EC1 danh hi\u1EC7u n\xE0y..."
+      });
+      await this.plugin.saveSettings();
+      this.display();
+    }));
+    const customShopItemsDetails = containerEl.createEl("details", { cls: "lg-settings-details" });
+    const customShopItemsSummary = customShopItemsDetails.createEl("summary");
+    customShopItemsSummary.createEl("h3", { text: "\u{1F381} C\u1EEDa h\xE0ng v\u1EADt ph\u1EA9m t\u1EF1 ch\u1ECDn", cls: "lg-settings-summary-title" });
+    this.plugin.settings.customShopItems.forEach((item, index) => {
+      const itemHeader = customShopItemsDetails.createEl("div", { cls: "lg-setting-stat-header" });
+      itemHeader.style.display = "flex";
+      itemHeader.style.justifyContent = "space-between";
+      itemHeader.style.alignItems = "center";
+      const itemTitle = itemHeader.createEl("h4", { text: item.name });
+      itemTitle.style.margin = "0";
+      const deleteBtn = itemHeader.createEl("button", { text: "X\xF3a", cls: "mod-warning" });
+      deleteBtn.addEventListener("click", async () => {
+        this.plugin.settings.customShopItems.splice(index, 1);
+        await this.plugin.saveSettings();
+        this.display();
+      });
+      new import_obsidian2.Setting(customShopItemsDetails).setName("T\xEAn v\u1EADt ph\u1EA9m").addText((text) => text.setValue(item.name).onChange(async (value) => {
+        this.plugin.settings.customShopItems[index].name = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian2.Setting(customShopItemsDetails).setName("Bi\u1EC3u t\u01B0\u1EE3ng (Icon)").addText((text) => text.setValue(item.icon).setPlaceholder("\u{1F381}").onChange(async (value) => {
+        this.plugin.settings.customShopItems[index].icon = value || "\u{1F381}";
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian2.Setting(customShopItemsDetails).setName("M\xF4 t\u1EA3").addText((text) => text.setValue(item.description).onChange(async (value) => {
+        this.plugin.settings.customShopItems[index].description = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian2.Setting(customShopItemsDetails).setName("Gi\xE1 (Coin)").addText((text) => text.setValue(item.cost.toString()).onChange(async (value) => {
+        const val = parseInt(value);
+        if (!isNaN(val)) {
+          this.plugin.settings.customShopItems[index].cost = val;
+          await this.plugin.saveSettings();
+        }
+      }));
+      customShopItemsDetails.createEl("hr");
+    });
+    new import_obsidian2.Setting(customShopItemsDetails).setName("Th\xEAm v\u1EADt ph\u1EA9m m\u1EDBi").addButton((btn) => btn.setButtonText("Th\xEAm V\u1EADt ph\u1EA9m").onClick(async () => {
+      this.plugin.settings.customShopItems.push({
+        id: `item-${Date.now()}`,
+        name: "Ph\u1EA7n th\u01B0\u1EDFng m\u1EDBi",
+        icon: "\u{1F381}",
+        description: "M\xF4 t\u1EA3 ph\u1EA7n th\u01B0\u1EDFng...",
+        cost: 50
       });
       await this.plugin.saveSettings();
       this.display();
