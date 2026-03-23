@@ -1,6 +1,6 @@
 {
 	"name": "life-gauge",
-	"version": "1.0.4",
+	"version": "1.0.5",
 	"description": "Life Gauge plugin for Obsidian",
 	"main": "main.js",
 	"scripts": {

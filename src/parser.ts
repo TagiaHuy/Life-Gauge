@@ -3,6 +3,7 @@ import { Stat } from "./data";
 export interface TaskReward {
     statId: string;
     amount: number;
+    earnedAmount?: number;
 }
 
 export interface LifeGaugeTask {
@@ -18,11 +19,11 @@ export interface LifeGaugeTask {
     occurrenceIndex: number;
 }
 export function getTaskKey(task: LifeGaugeTask): string {
-    const rewardsKey = (task.rewards || [])
-        .map(r => `${r.statId}${r.amount}`)
+    const statsKey = (task.rewards || [])
+        .map(r => r.statId)
         .sort()
         .join(',');
-    return `${task.text}:${rewardsKey}:${task.date || ''}:${task.time || ''}:${task.occurrenceIndex}`;
+    return `${task.text}:${statsKey}:${task.date || ''}:${task.time || ''}:${task.occurrenceIndex}`;
 }
 
 export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
@@ -57,20 +58,19 @@ export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
                 remainingText = remainingText.replace(/\s*\(done\)$/, '').trim();
             }
 
-            // 1. Extract Rewards
+            // 1. Extract Stats from (Stat1, Stat2)
             const rewards: TaskReward[] = [];
-            const rewardMatch = rewardSectionRegex.exec(remainingText);
-            if (rewardMatch) {
-                const rewardsRaw = rewardMatch[1];
-                let rMatch;
-                while ((rMatch = rewardRegex.exec(rewardsRaw)) !== null) {
-                    const amount = parseInt(rMatch[1]);
-                    const statName = rMatch[2].toLowerCase();
-                    const stat = stats.find(s => s.name.toLowerCase() === statName || s.id.toLowerCase() === statName);
+            const statMatch = rewardSectionRegex.exec(remainingText);
+            if (statMatch) {
+                const statsRaw = statMatch[1];
+                const statNames = statsRaw.split(',').map(s => s.trim().toLowerCase());
+                
+                statNames.forEach(name => {
+                    const stat = stats.find(s => s.name.toLowerCase() === name || s.id.toLowerCase() === name);
                     if (stat) {
-                        rewards.push({ statId: stat.id, amount });
+                        rewards.push({ statId: stat.id, amount: 0 }); // Amount is now dynamic
                     }
-                }
+                });
                 remainingText = remainingText.replace(rewardSectionRegex, '').trim();
             }
 
@@ -102,7 +102,7 @@ export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
             if (!date && !time) return;
 
             // Calculate occurrence index for duplicate detection
-            const baseKey = `${remainingText}:${rewards.map(r => `${r.statId}${r.amount}`).sort().join(',')}:${date || ''}:${time || ''}`;
+            const baseKey = `${remainingText}:${rewards.map(r => r.statId).sort().join(',')}:${date || ''}:${time || ''}`;
             const occurrenceIndex = occurrenceMap.get(baseKey) || 0;
             occurrenceMap.set(baseKey, occurrenceIndex + 1);
 

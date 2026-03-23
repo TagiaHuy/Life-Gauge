@@ -114,7 +114,11 @@ var DEFAULT_SETTINGS = {
   skills: [],
   completedTasks: [],
   penaltyPoint: 1,
-  refreshInterval: 5
+  refreshInterval: 5,
+  hunger: 100,
+  maxHunger: 100,
+  coins: 0,
+  lastHungerUpdate: Date.now()
 };
 function calculateLevel(currentXp, baseXp, xpIncrement) {
   let level = 1;
@@ -144,8 +148,8 @@ var import_obsidian = require("obsidian");
 
 // src/parser.ts
 function getTaskKey(task) {
-  const rewardsKey = (task.rewards || []).map((r) => `${r.statId}${r.amount}`).sort().join(",");
-  return `${task.text}:${rewardsKey}:${task.date || ""}:${task.time || ""}:${task.occurrenceIndex}`;
+  const statsKey = (task.rewards || []).map((r) => r.statId).sort().join(",");
+  return `${task.text}:${statsKey}:${task.date || ""}:${task.time || ""}:${task.occurrenceIndex}`;
 }
 function parseTasks(content, stats) {
   const lines = content.split("\n");
@@ -172,18 +176,16 @@ function parseTasks(content, stats) {
         remainingText = remainingText.replace(/\s*\(done\)$/, "").trim();
       }
       const rewards = [];
-      const rewardMatch = rewardSectionRegex.exec(remainingText);
-      if (rewardMatch) {
-        const rewardsRaw = rewardMatch[1];
-        let rMatch;
-        while ((rMatch = rewardRegex.exec(rewardsRaw)) !== null) {
-          const amount = parseInt(rMatch[1]);
-          const statName = rMatch[2].toLowerCase();
-          const stat = stats.find((s) => s.name.toLowerCase() === statName || s.id.toLowerCase() === statName);
+      const statMatch = rewardSectionRegex.exec(remainingText);
+      if (statMatch) {
+        const statsRaw = statMatch[1];
+        const statNames = statsRaw.split(",").map((s) => s.trim().toLowerCase());
+        statNames.forEach((name) => {
+          const stat = stats.find((s) => s.name.toLowerCase() === name || s.id.toLowerCase() === name);
           if (stat) {
-            rewards.push({ statId: stat.id, amount });
+            rewards.push({ statId: stat.id, amount: 0 });
           }
-        }
+        });
         remainingText = remainingText.replace(rewardSectionRegex, "").trim();
       }
       let date;
@@ -206,7 +208,7 @@ function parseTasks(content, stats) {
       remainingText = remainingText.replace(skillRegex, "").trim();
       if (!date && !time)
         return;
-      const baseKey = `${remainingText}:${rewards.map((r) => `${r.statId}${r.amount}`).sort().join(",")}:${date || ""}:${time || ""}`;
+      const baseKey = `${remainingText}:${rewards.map((r) => r.statId).sort().join(",")}:${date || ""}:${time || ""}`;
       const occurrenceIndex = occurrenceMap.get(baseKey) || 0;
       occurrenceMap.set(baseKey, occurrenceIndex + 1);
       tasks.push({
@@ -249,6 +251,7 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     __publicField(this, "plugin");
     __publicField(this, "tasks", []);
     __publicField(this, "isUpdating", false);
+    __publicField(this, "showShop", false);
     this.plugin = plugin;
   }
   getViewType() {
@@ -277,6 +280,10 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       contentEl.empty();
       contentEl.addClass("life-gauge-dashboard");
       this.renderHeader(contentEl, title, nextTitle, totalXp);
+      if (this.showShop) {
+        this.renderShop(contentEl);
+        return;
+      }
       this.renderStats(contentEl);
       if (this.plugin.settings.skills.length > 0) {
         this.renderSkills(contentEl);
@@ -299,12 +306,25 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
   }
   renderHeader(parent, title, nextTitle, totalXp) {
     const header = parent.createEl("div", { cls: "lg-header" });
-    const avatarContainer = header.createEl("div", { cls: "lg-avatar-container" });
+    const topBar = header.createEl("div", { cls: "lg-header-top-bar" });
+    this.renderSatiety(topBar);
+    const coinsShopGroup = topBar.createEl("div", { cls: "lg-coins-shop-group" });
+    const coinContainer = coinsShopGroup.createEl("div", { cls: "lg-coin-container" });
+    coinContainer.createEl("span", { text: `\u{1F4B0} ${Math.floor(this.plugin.settings.coins)}`, cls: "lg-coin-text" });
+    const shopBtn = coinsShopGroup.createEl("button", { text: "\u{1F3EA} Shop", cls: "lg-shop-btn" });
+    shopBtn.addEventListener("click", () => this.toggleShop());
+    const settingsIcon = topBar.createEl("div", { cls: "lg-settings-icon", text: "\u2699\uFE0F" });
+    settingsIcon.addEventListener("click", () => {
+      this.app.setting.open();
+      this.app.setting.openTabById(this.plugin.manifest.id);
+    });
+    const mainInfo = header.createEl("div", { cls: "lg-header-main" });
+    const avatarContainer = mainInfo.createEl("div", { cls: "lg-avatar-container" });
     const avatar = avatarContainer.createEl("img", {
       cls: "lg-avatar",
       attr: { src: this.app.vault.adapter.getResourcePath(this.plugin.settings.avatarPath) }
     });
-    const info = header.createEl("div", { cls: "lg-info" });
+    const info = mainInfo.createEl("div", { cls: "lg-info" });
     info.createEl("div", { cls: "lg-nickname", text: `${title.icon} ${title.name.toUpperCase()} ${title.icon}` });
     info.createEl("div", { cls: "lg-description", text: title.description });
     if (nextTitle) {
@@ -313,10 +333,63 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     } else {
       info.createEl("div", { cls: "lg-next-rank", text: `\u{1F3C6} B\u1EA1n \u0111\xE3 \u0111\u1EA1t \u0111\u1EC9nh vinh quang!` });
     }
-    const settingsIcon = header.createEl("div", { cls: "lg-settings-icon", text: "\u2699\uFE0F" });
-    settingsIcon.addEventListener("click", () => {
-      this.app.setting.open();
-      this.app.setting.openTabById(this.plugin.manifest.id);
+  }
+  renderSatiety(parent) {
+    const hunger = this.plugin.settings.hunger;
+    const maxHunger = this.plugin.settings.maxHunger;
+    const percent = hunger / maxHunger * 100;
+    const container = parent.createEl("div", { cls: "lg-satiety-container" });
+    container.createEl("div", { text: "\u{1F356} Satiety", cls: "lg-satiety-label" });
+    const barContainer = container.createEl("div", { cls: "lg-bar-container satiety" });
+    const bar = barContainer.createEl("div", { cls: "lg-bar-fill" });
+    bar.style.width = `${Math.min(100, percent)}%`;
+    if (percent >= 70) {
+      bar.style.backgroundColor = "#4dff88";
+    } else if (percent >= 30) {
+      bar.style.backgroundColor = "#ffcc00";
+    } else {
+      bar.style.backgroundColor = "#ff4d4d";
+    }
+    container.createEl("div", { text: `${Math.floor(hunger)} / ${maxHunger}`, cls: "lg-satiety-value" });
+  }
+  toggleShop() {
+    this.showShop = !this.showShop;
+    this.update();
+  }
+  renderShop(parent) {
+    const shopContainer = parent.createEl("div", { cls: "lg-shop-container" });
+    shopContainer.createEl("h3", { text: "\u{1F3EA} Food Shop", cls: "lg-section-title" });
+    const backBtn = shopContainer.createEl("button", { text: "\u2B05\uFE0F Back to Dashboard", cls: "lg-back-btn" });
+    backBtn.addEventListener("click", () => this.toggleShop());
+    const shopGrid = shopContainer.createEl("div", { cls: "lg-shop-grid" });
+    const items = [
+      { icon: "\u{1F352}", name: "Cherry", boost: 5, cost: 10 },
+      { icon: "\u{1F34C}", name: "Banana", boost: 7, cost: 14 },
+      { icon: "\u{1F35E}", name: "Bread", boost: 15, cost: 24 },
+      { icon: "\u{1F371}", name: "Meal", boost: 25, cost: 40 }
+    ];
+    items.forEach((item) => {
+      const card = shopGrid.createEl("div", { cls: "lg-shop-card" });
+      card.createEl("div", { text: item.icon, cls: "lg-shop-item-icon" });
+      card.createEl("div", { text: item.name, cls: "lg-shop-item-name" });
+      card.createEl("div", { text: `+${item.boost} Satiety`, cls: "lg-shop-item-boost" });
+      const buyBtn = card.createEl("button", {
+        text: `${item.cost} \u{1F4B0} Buy`,
+        cls: "lg-buy-btn"
+      });
+      if (this.plugin.settings.coins < item.cost) {
+        buyBtn.setAttr("disabled", true);
+        buyBtn.addClass("is-disabled");
+      }
+      buyBtn.addEventListener("click", async () => {
+        if (this.plugin.settings.coins >= item.cost) {
+          this.plugin.settings.coins -= item.cost;
+          this.plugin.settings.hunger = Math.min(this.plugin.settings.maxHunger, this.plugin.settings.hunger + item.boost);
+          new import_obsidian.Notice(`Consumed ${item.name}! +${item.boost} Satiety.`);
+          await this.plugin.saveSettings();
+          this.update();
+        }
+      });
     });
   }
   renderStats(parent) {
@@ -378,7 +451,11 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
         if (task.rewards.length > 0) {
           const rewardsText = task.rewards.map((r) => {
             const stat = this.plugin.settings.stats.find((s) => s.id === r.statId);
-            return `+${r.amount} ${stat ? stat.name : r.statId}`;
+            const label = stat ? stat.name : r.statId;
+            if (task.isProcessed && r.earnedAmount !== void 0) {
+              return `+${r.earnedAmount} ${label}`;
+            }
+            return label;
           }).join(", ");
           meta.createEl("span", { text: `(${rewardsText})`, cls: "lg-reward-text" });
         }
@@ -411,8 +488,23 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       const now = /* @__PURE__ */ new Date();
       const penaltyInfo = this.plugin.getPenaltyInfo(task, now);
       if (completed) {
-        this.plugin.applyReward(task, penaltyInfo);
+        const coins = this.plugin.applyReward(task, penaltyInfo);
         this.plugin.settings.completedTasks.push(taskId);
+        const rewardsList = task.rewards.map((r) => {
+          const stat = this.plugin.settings.stats.find((s) => s.id === r.statId);
+          const finalAmount = r.earnedAmount || 0;
+          return `${finalAmount > 0 ? "+" : ""}${finalAmount} ${stat ? stat.name : r.statId}`;
+        }).join(", ");
+        let rewardMsg = rewardsList ? ` (${rewardsList})` : "";
+        rewardMsg += ` +\u{1F4B0} ${coins} coin`;
+        if (penaltyInfo.isLate) {
+          const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
+          const statusMsg = penaltyInfo.multiplier < 0 ? `B\u1ECB tr\u1EEB ${-Math.round(penaltyInfo.multiplier * 100)}% \u0111i\u1EC3m` : `Gi\u1EA3m ${reductionPercent}% \u0111i\u1EC3m`;
+          new import_obsidian.Notice(`\u26A0\uFE0F Ho\xE0n th\xE0nh tr\u1EC5: ${task.text}${rewardMsg}
+${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
+        } else {
+          new import_obsidian.Notice(`\u2705 Nhi\u1EC7m v\u1EE5 ho\xE0n th\xE0nh: ${task.text}${rewardMsg}`);
+        }
       } else {
         this.plugin.applyUnreward(task);
         const index = this.plugin.settings.completedTasks.indexOf(taskId);
@@ -420,26 +512,16 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
           this.plugin.settings.completedTasks.splice(index, 1);
         }
       }
-      const rewardsList = task.rewards.map((r) => {
-        const stat = this.plugin.settings.stats.find((s) => s.id === r.statId);
-        const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
-        return `${finalAmount > 0 ? "+" : ""}${finalAmount} ${stat ? stat.name : r.statId}`;
-      }).join(", ");
-      const rewardMsg = rewardsList ? ` (${rewardsList})` : "";
-      if (completed && penaltyInfo.isLate) {
-        const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
-        const statusMsg = penaltyInfo.multiplier < 0 ? `B\u1ECB tr\u1EEB ${-Math.round(penaltyInfo.multiplier * 100)}% \u0111i\u1EC3m` : `Gi\u1EA3m ${reductionPercent}% \u0111i\u1EC3m`;
-        new import_obsidian.Notice(`\u26A0\uFE0F Ho\xE0n th\xE0nh tr\u1EC5: ${task.text}${rewardMsg}
-${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
-      } else if (completed) {
-        new import_obsidian.Notice(`\u2705 Nhi\u1EC7m v\u1EE5 ho\xE0n th\xE0nh: ${task.text}${rewardMsg}`);
-      }
       await this.plugin.saveSettings();
       const newTotalXp = getTotalXp(this.plugin.settings.stats);
       const newTitle = getCurrentTitle(newTotalXp, this.plugin.settings.titles);
       if (completed && newTitle.name !== currentTitle.name) {
+        this.plugin.settings.maxHunger += 50;
+        this.plugin.settings.hunger += 50;
         new import_obsidian.Notice(`\u{1F389} CH\xDAC M\u1EEANG! \u{1F389}
-B\u1EA1n \u0111\xE3 \u0111\u1EA1t c\u1EA5p \u0111\u1ED9 m\u1EDBi: ${newTitle.name}!`, 5e3);
+B\u1EA1n \u0111\xE3 \u0111\u1EA1t c\u1EA5p \u0111\u1ED9 m\u1EDBi: ${newTitle.name}!
+Max Satiety +50!`, 5e3);
+        await this.plugin.saveSettings();
       }
     } finally {
       this.plugin.isInternalChange = false;
@@ -459,6 +541,8 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
   }
   async onload() {
     await this.loadSettings();
+    this.updateHunger();
+    await this.saveSettings();
     this.registerView(
       VIEW_TYPE_LIFE_GAUGE,
       (leaf) => new LifeGaugeView(leaf, this)
@@ -467,6 +551,13 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
       this.activateView();
     });
     this.addSettingTab(new LifeGaugeSettingTab(this.app, this));
+    this.registerInterval(
+      window.setInterval(() => {
+        this.updateHunger();
+        this.saveSettings();
+      }, 60 * 1e3)
+      // Every minute
+    );
     this.registerEvent(
       this.app.vault.on("modify", async (file) => {
         if (this.isInternalChange)
@@ -478,11 +569,19 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
     );
   }
   applyReward(task, penaltyInfo) {
+    const hungerMultiplier = this.getHungerMultiplier();
+    const finalMultiplier = penaltyInfo.multiplier * hungerMultiplier;
+    let totalXpAwarded = 0;
     task.rewards.forEach((reward) => {
       const stat = this.settings.stats.find((s) => s.id === reward.statId);
       if (stat) {
-        const finalReward = reward.amount * penaltyInfo.multiplier;
+        const { requiredXp } = calculateLevel(stat.currentXp, stat.baseXp, stat.xpIncrement);
+        const baseXP = Math.floor(Math.random() * 15) + 1;
+        const bonusXP = (requiredXp - 100) / 10;
+        const finalReward = (baseXP + bonusXP) * finalMultiplier;
         stat.currentXp += finalReward;
+        totalXpAwarded += finalReward;
+        reward.earnedAmount = Math.round(finalReward * 10) / 10;
         if (stat.currentXp < 0)
           stat.currentXp = 0;
       }
@@ -490,13 +589,61 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
     task.skills.forEach((skillName) => {
       const skill = this.settings.skills.find((s) => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
       if (skill) {
-        const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
-        const finalReward = totalReward * penaltyInfo.multiplier;
+        const { requiredXp } = calculateLevel(skill.currentXp, skill.baseXp, skill.xpIncrement);
+        const baseXP = Math.floor(Math.random() * 15) + 1;
+        const bonusXP = (requiredXp - 100) / 10;
+        const finalReward = (baseXP + bonusXP) * finalMultiplier;
         skill.currentXp += finalReward;
         if (skill.currentXp < 0)
           skill.currentXp = 0;
       }
     });
+    const coins = this.getCoinReward();
+    this.settings.coins += coins;
+    return coins;
+  }
+  getHungerMultiplier() {
+    if (this.settings.hunger >= this.settings.maxHunger)
+      return 1.2;
+    if (this.settings.hunger >= 70)
+      return 1;
+    if (this.settings.hunger >= 30) {
+      return Math.max(0.1, this.settings.hunger / 100);
+    }
+    return 0.1;
+  }
+  getCoinReward() {
+    const r = Math.random() * 100;
+    if (r < 80)
+      return Math.floor(Math.random() * 10) + 1;
+    if (r < 90)
+      return Math.floor(Math.random() * 10) + 11;
+    if (r < 95)
+      return Math.floor(Math.random() * 10) + 21;
+    if (r < 98)
+      return Math.floor(Math.random() * 10) + 31;
+    return Math.floor(Math.random() * 10) + 41;
+  }
+  updateHunger() {
+    const now = Date.now();
+    const elapsedMinutes = (now - this.settings.lastHungerUpdate) / (1e3 * 60);
+    if (elapsedMinutes <= 0)
+      return;
+    const depletionRate = this.settings.maxHunger / 100 * (1 / 30) * this.settings.penaltyPoint;
+    const hungerLost = elapsedMinutes * depletionRate;
+    this.settings.hunger = Math.max(0, this.settings.hunger - hungerLost);
+    this.settings.lastHungerUpdate = now;
+    if (this.settings.hunger < 30) {
+      const hoursElapsed = elapsedMinutes / 60;
+      const penaltyFactor = (30 - this.settings.hunger) / 30;
+      const xpLoss = hoursElapsed * penaltyFactor * 1;
+      this.settings.stats.forEach((stat) => {
+        stat.currentXp = Math.max(0, stat.currentXp - xpLoss);
+      });
+      this.settings.skills.forEach((skill) => {
+        skill.currentXp = Math.max(0, skill.currentXp - xpLoss);
+      });
+    }
   }
   applyUnreward(task) {
     task.rewards.forEach((reward) => {
@@ -515,10 +662,13 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
   showRewardNotice(task, penaltyInfo) {
     const rewardsList = task.rewards.map((r) => {
       const stat = this.settings.stats.find((s) => s.id === r.statId);
-      const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
+      const finalAmount = r.earnedAmount || 0;
       return `${finalAmount > 0 ? "+" : ""}${finalAmount} ${stat ? stat.name : r.statId}`;
     }).join(", ");
-    const rewardMsg = rewardsList ? ` (${rewardsList})` : "";
+    let rewardMsg = rewardsList ? ` (${rewardsList})` : "";
+    if (task.earnedCoins) {
+      rewardMsg += ` +\u{1F4B0} ${task.earnedCoins} coin`;
+    }
     if (penaltyInfo.isLate) {
       const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
       const statusMsg = penaltyInfo.multiplier < 0 ? `B\u1ECB tr\u1EEB ${-Math.round(penaltyInfo.multiplier * 100)}% \u0111i\u1EC3m` : `Gi\u1EA3m ${reductionPercent}% \u0111i\u1EC3m`;
@@ -549,9 +699,21 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
         const key = getTaskKey(task);
         if (!this.settings.completedTasks.includes(key)) {
           const penaltyInfo = this.getPenaltyInfo(task, now);
-          this.applyReward(task, penaltyInfo);
+          const oldTotalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
+          const oldTitle = getCurrentTitle(oldTotalXp, this.settings.titles);
+          const coins = this.applyReward(task, penaltyInfo);
+          task.earnedCoins = coins;
           this.settings.completedTasks.push(key);
           this.showRewardNotice(task, penaltyInfo);
+          const newTotalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
+          const newTitle = getCurrentTitle(newTotalXp, this.settings.titles);
+          if (newTitle.name !== oldTitle.name) {
+            this.settings.maxHunger += 50;
+            this.settings.hunger += 50;
+            new import_obsidian2.Notice(`\u{1F389} CH\xDAC M\u1EEANG! \u{1F389}
+B\u1EA1n \u0111\xE3 \u0111\u1EA1t c\u1EA5p \u0111\u1ED9 m\u1EDBi: ${newTitle.name}!
+Max Satiety +50!`, 5e3);
+          }
           changed = true;
         }
         currentContent = updateTaskInContent(currentContent, task.originalLine, true, true);
@@ -583,6 +745,9 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
         await this.saveSettings();
       } else {
         this.refreshViews();
+      }
+      if (changed) {
+        const totalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
       }
     } finally {
       this.isSyncing = false;

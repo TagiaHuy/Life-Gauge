@@ -1,5 +1,5 @@
 import { Plugin, PluginSettingTab, App, Setting, normalizePath, TFile, Notice } from 'obsidian';
-import { LifeGaugeSettings, DEFAULT_SETTINGS, Stat, DEFAULT_STATS } from './src/data';
+import { LifeGaugeSettings, DEFAULT_SETTINGS, Stat, DEFAULT_STATS, getCurrentTitle, calculateLevel } from './src/data';
 import { LifeGaugeView, VIEW_TYPE_LIFE_GAUGE } from './src/view';
 import { parseTasks, getTaskKey, updateTaskInContent } from './src/parser';
 
@@ -12,6 +12,8 @@ export default class LifeGaugePlugin extends Plugin {
 
     async onload() {
         await this.loadSettings();
+        this.updateHunger();
+        await this.saveSettings();
 
         this.registerView(
             VIEW_TYPE_LIFE_GAUGE,
@@ -23,6 +25,14 @@ export default class LifeGaugePlugin extends Plugin {
 		});
 
         this.addSettingTab(new LifeGaugeSettingTab(this.app, this));
+
+        // Start hunger timer
+        this.registerInterval(
+            window.setInterval(() => {
+                this.updateHunger();
+                this.saveSettings();
+            }, 60 * 1000) // Every minute
+        );
 
         // Register event to refresh view when task file changes
         this.registerEvent(
@@ -36,11 +46,22 @@ export default class LifeGaugePlugin extends Plugin {
     }
 
     applyReward(task: any, penaltyInfo: { multiplier: number }) {
+        const hungerMultiplier = this.getHungerMultiplier();
+        const finalMultiplier = penaltyInfo.multiplier * hungerMultiplier;
+        let totalXpAwarded = 0;
+
         task.rewards.forEach((reward: any) => {
             const stat = this.settings.stats.find(s => s.id === reward.statId);
             if (stat) {
-                const finalReward = reward.amount * penaltyInfo.multiplier;
+                // Formula: random(1, 15) + (requiredXp - 100) / 10
+                const { requiredXp } = calculateLevel(stat.currentXp, stat.baseXp, stat.xpIncrement);
+                const baseXP = Math.floor(Math.random() * 15) + 1;
+                const bonusXP = (requiredXp - 100) / 10;
+                const finalReward = (baseXP + bonusXP) * finalMultiplier;
+                
                 stat.currentXp += finalReward;
+                totalXpAwarded += finalReward;
+                reward.earnedAmount = Math.round(finalReward * 10) / 10; // For notice
                 if (stat.currentXp < 0) stat.currentXp = 0;
             }
         });
@@ -48,12 +69,70 @@ export default class LifeGaugePlugin extends Plugin {
         task.skills.forEach((skillName: string) => {
             const skill = this.settings.skills.find(s => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
             if (skill) {
-                const totalReward = task.rewards.reduce((sum: number, r: any) => sum + r.amount, 0) || 10;
-                const finalReward = totalReward * penaltyInfo.multiplier;
+                const { requiredXp } = calculateLevel(skill.currentXp, skill.baseXp, skill.xpIncrement);
+                const baseXP = Math.floor(Math.random() * 15) + 1;
+                const bonusXP = (requiredXp - 100) / 10;
+                const finalReward = (baseXP + bonusXP) * finalMultiplier;
+                
                 skill.currentXp += finalReward;
                 if (skill.currentXp < 0) skill.currentXp = 0;
             }
         });
+
+        // Award Coins
+        const coins = this.getCoinReward();
+        this.settings.coins += coins;
+        
+        return coins; // Return for notification
+    }
+
+    getHungerMultiplier(): number {
+        if (this.settings.hunger >= this.settings.maxHunger) return 1.2; // 20% Bonus if full
+        if (this.settings.hunger >= 70) return 1.0;
+        if (this.settings.hunger >= 30) {
+            // Scale from 1.0 at 70% to 0.3 at 30%? No, user said "càng thấp giảm càng nhiều"
+            // Let's use hunger/100 but capped at 1.0
+            return Math.max(0.1, this.settings.hunger / 100);
+        }
+        return 0.1; // Minimum rewards in red zone
+    }
+
+    getCoinReward(): number {
+        const r = Math.random() * 100;
+        if (r < 80) return Math.floor(Math.random() * 10) + 1; // 1-10 (80%)
+        if (r < 90) return Math.floor(Math.random() * 10) + 11; // 11-20 (10%)
+        if (r < 95) return Math.floor(Math.random() * 10) + 21; // 21-30 (5%)
+        if (r < 98) return Math.floor(Math.random() * 10) + 31; // 31-40 (3%)
+        return Math.floor(Math.random() * 10) + 41; // 41-50 (2%)
+    }
+
+    updateHunger() {
+        const now = Date.now();
+        const elapsedMinutes = (now - this.settings.lastHungerUpdate) / (1000 * 60);
+        if (elapsedMinutes <= 0) return;
+
+        // Base rate: 1 point per 30 mins per 100 max hunger
+        // depletionRate = (maxHunger / 100) * (1 / 30) * penaltyPoint points per minute
+        const depletionRate = (this.settings.maxHunger / 100) * (1 / 30) * this.settings.penaltyPoint;
+        const hungerLost = elapsedMinutes * depletionRate;
+
+        this.settings.hunger = Math.max(0, this.settings.hunger - hungerLost);
+        this.settings.lastHungerUpdate = now;
+
+        // Red zone penalty (below 30%)
+        if (this.settings.hunger < 30) {
+            const hoursElapsed = elapsedMinutes / 60;
+            // Penalty = (30 - Hunger) / 30 * MaxPenalty (1 XP per hour)
+            const penaltyFactor = (30 - this.settings.hunger) / 30;
+            const xpLoss = hoursElapsed * penaltyFactor * 1;
+
+            this.settings.stats.forEach(stat => {
+                stat.currentXp = Math.max(0, stat.currentXp - xpLoss);
+            });
+            this.settings.skills.forEach(skill => {
+                skill.currentXp = Math.max(0, skill.currentXp - xpLoss);
+            });
+        }
     }
 
     applyUnreward(task: any) {
@@ -73,10 +152,14 @@ export default class LifeGaugePlugin extends Plugin {
     showRewardNotice(task: any, penaltyInfo: { multiplier: number, isLate: boolean, minutesLate: number }) {
         const rewardsList = task.rewards.map((r: any) => {
             const stat = this.settings.stats.find(s => s.id === r.statId);
-            const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
+            const finalAmount = r.earnedAmount || 0;
             return `${finalAmount > 0 ? '+' : ''}${finalAmount} ${stat ? stat.name : r.statId}`;
         }).join(', ');
-        const rewardMsg = rewardsList ? ` (${rewardsList})` : '';
+        
+        let rewardMsg = rewardsList ? ` (${rewardsList})` : '';
+        if (task.earnedCoins) {
+            rewardMsg += ` +💰 ${task.earnedCoins} coin`;
+        }
 
         if (penaltyInfo.isLate) {
             const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
@@ -115,9 +198,23 @@ export default class LifeGaugePlugin extends Plugin {
                 // Only reward if not already rewarded
                 if (!this.settings.completedTasks.includes(key)) {
                     const penaltyInfo = this.getPenaltyInfo(task, now);
-                    this.applyReward(task, penaltyInfo);
+                    const oldTotalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
+                    const oldTitle = getCurrentTitle(oldTotalXp, this.settings.titles);
+
+                    const coins = this.applyReward(task, penaltyInfo);
+                    (task as any).earnedCoins = coins; // Temporary storage for notice
+
                     this.settings.completedTasks.push(key);
                     this.showRewardNotice(task, penaltyInfo);
+
+                    const newTotalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
+                    const newTitle = getCurrentTitle(newTotalXp, this.settings.titles);
+                    if (newTitle.name !== oldTitle.name) {
+                        this.settings.maxHunger += 50;
+                        this.settings.hunger += 50;
+                        new Notice(`🎉 CHÚC MỪNG! 🎉\nBạn đã đạt cấp độ mới: ${newTitle.name}!\nMax Satiety +50!`, 5000);
+                    }
+
                     changed = true;
                 }
                 
@@ -155,6 +252,12 @@ export default class LifeGaugePlugin extends Plugin {
                 await this.saveSettings();
             } else {
                 this.refreshViews();
+            }
+
+            // Check for title unlock after potential changed
+            if (changed) {
+                const totalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
+                // We'll need to check if the title changed here as well if sync happens via file modify
             }
         } finally {
             this.isSyncing = false;

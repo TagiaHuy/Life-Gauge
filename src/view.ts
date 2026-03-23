@@ -53,6 +53,11 @@ export class LifeGaugeView extends ItemView {
 
             this.renderHeader(contentEl, title, nextTitle, totalXp);
 
+            if (this.showShop) {
+                this.renderShop(contentEl);
+                return;
+            }
+
             // Stats section
             this.renderStats(contentEl);
 
@@ -83,15 +88,39 @@ export class LifeGaugeView extends ItemView {
     renderHeader(parent: HTMLElement, title: Title, nextTitle: Title | null, totalXp: number) {
         const header = parent.createEl('div', { cls: 'lg-header' });
 
+        // --- Top Bar (Satiety, Coins, Shop, Settings) ---
+        const topBar = header.createEl('div', { cls: 'lg-header-top-bar' });
+        
+        // Satiety Bar
+        this.renderSatiety(topBar);
+
+        // Coins & Shop
+        const coinsShopGroup = topBar.createEl('div', { cls: 'lg-coins-shop-group' });
+        const coinContainer = coinsShopGroup.createEl('div', { cls: 'lg-coin-container' });
+        coinContainer.createEl('span', { text: `💰 ${Math.floor(this.plugin.settings.coins)}`, cls: 'lg-coin-text' });
+
+        const shopBtn = coinsShopGroup.createEl('button', { text: '🏪 Shop', cls: 'lg-shop-btn' });
+        shopBtn.addEventListener('click', () => this.toggleShop());
+
+        // Settings icon
+        const settingsIcon = topBar.createEl('div', { cls: 'lg-settings-icon', text: '⚙️' });
+        settingsIcon.addEventListener('click', () => {
+            (this.app as any).setting.open();
+            (this.app as any).setting.openTabById(this.plugin.manifest.id);
+        });
+
+        // --- Main Info (Avatar + Nickname) ---
+        const mainInfo = header.createEl('div', { cls: 'lg-header-main' });
+
         // Avatar
-        const avatarContainer = header.createEl('div', { cls: 'lg-avatar-container' });
+        const avatarContainer = mainInfo.createEl('div', { cls: 'lg-avatar-container' });
         const avatar = avatarContainer.createEl('img', {
             cls: 'lg-avatar',
             attr: { src: this.app.vault.adapter.getResourcePath(this.plugin.settings.avatarPath) }
         });
 
         // Info
-        const info = header.createEl('div', { cls: 'lg-info' });
+        const info = mainInfo.createEl('div', { cls: 'lg-info' });
         info.createEl('div', { cls: 'lg-nickname', text: `${title.icon} ${title.name.toUpperCase()} ${title.icon}` });
         info.createEl('div', { cls: 'lg-description', text: title.description });
 
@@ -101,12 +130,79 @@ export class LifeGaugeView extends ItemView {
         } else {
             info.createEl('div', { cls: 'lg-next-rank', text: `🏆 Bạn đã đạt đỉnh vinh quang!` });
         }
+    }
 
-        // Settings icon
-        const settingsIcon = header.createEl('div', { cls: 'lg-settings-icon', text: '⚙️' });
-        settingsIcon.addEventListener('click', () => {
-            (this.app as any).setting.open();
-            (this.app as any).setting.openTabById(this.plugin.manifest.id);
+    renderSatiety(parent: HTMLElement) {
+        const hunger = this.plugin.settings.hunger;
+        const maxHunger = this.plugin.settings.maxHunger;
+        const percent = (hunger / maxHunger) * 100;
+
+        const container = parent.createEl('div', { cls: 'lg-satiety-container' });
+        container.createEl('div', { text: '🍖 Satiety', cls: 'lg-satiety-label' });
+
+        const barContainer = container.createEl('div', { cls: 'lg-bar-container satiety' });
+        const bar = barContainer.createEl('div', { cls: 'lg-bar-fill' });
+        bar.style.width = `${Math.min(100, percent)}%`;
+        
+        // Color coding
+        if (percent >= 70) {
+            bar.style.backgroundColor = '#4dff88'; // Green
+        } else if (percent >= 30) {
+            bar.style.backgroundColor = '#ffcc00'; // Yellow
+        } else {
+            bar.style.backgroundColor = '#ff4d4d'; // Red
+        }
+
+        container.createEl('div', { text: `${Math.floor(hunger)} / ${maxHunger}`, cls: 'lg-satiety-value' });
+    }
+
+    showShop = false;
+    toggleShop() {
+        this.showShop = !this.showShop;
+        this.update();
+    }
+
+    renderShop(parent: HTMLElement) {
+        const shopContainer = parent.createEl('div', { cls: 'lg-shop-container' });
+        shopContainer.createEl('h3', { text: '🏪 Food Shop', cls: 'lg-section-title' });
+
+        const backBtn = shopContainer.createEl('button', { text: '⬅️ Back to Dashboard', cls: 'lg-back-btn' });
+        backBtn.addEventListener('click', () => this.toggleShop());
+
+        const shopGrid = shopContainer.createEl('div', { cls: 'lg-shop-grid' });
+
+        const items = [
+            { icon: '🍒', name: 'Cherry', boost: 5, cost: 10 },
+            { icon: '🍌', name: 'Banana', boost: 7, cost: 14 },
+            { icon: '🍞', name: 'Bread', boost: 15, cost: 24 },
+            { icon: '🍱', name: 'Meal', boost: 25, cost: 40 },
+        ];
+
+        items.forEach(item => {
+            const card = shopGrid.createEl('div', { cls: 'lg-shop-card' });
+            card.createEl('div', { text: item.icon, cls: 'lg-shop-item-icon' });
+            card.createEl('div', { text: item.name, cls: 'lg-shop-item-name' });
+            card.createEl('div', { text: `+${item.boost} Satiety`, cls: 'lg-shop-item-boost' });
+            
+            const buyBtn = card.createEl('button', { 
+                text: `${item.cost} 💰 Buy`, 
+                cls: 'lg-buy-btn' 
+            });
+            
+            if (this.plugin.settings.coins < item.cost) {
+                buyBtn.setAttr('disabled', true);
+                buyBtn.addClass('is-disabled');
+            }
+
+            buyBtn.addEventListener('click', async () => {
+                if (this.plugin.settings.coins >= item.cost) {
+                    this.plugin.settings.coins -= item.cost;
+                    this.plugin.settings.hunger = Math.min(this.plugin.settings.maxHunger, this.plugin.settings.hunger + item.boost);
+                    new Notice(`Consumed ${item.name}! +${item.boost} Satiety.`);
+                    await this.plugin.saveSettings();
+                    this.update();
+                }
+            });
         });
     }
 
@@ -193,7 +289,11 @@ export class LifeGaugeView extends ItemView {
                 if (task.rewards.length > 0) {
                     const rewardsText = task.rewards.map(r => {
                         const stat = this.plugin.settings.stats.find(s => s.id === r.statId);
-                        return `+${r.amount} ${stat ? stat.name : r.statId}`;
+                        const label = stat ? stat.name : r.statId;
+                        if (task.isProcessed && r.earnedAmount !== undefined) {
+                            return `+${r.earnedAmount} ${label}`;
+                        }
+                        return label;
                     }).join(', ');
                     meta.createEl('span', { text: `(${rewardsText})`, cls: 'lg-reward-text' });
                 }
@@ -237,29 +337,30 @@ export class LifeGaugeView extends ItemView {
             const penaltyInfo = this.plugin.getPenaltyInfo(task, now);
 
             if (completed) {
-                this.plugin.applyReward(task, penaltyInfo);
+                const coins = this.plugin.applyReward(task, penaltyInfo);
                 this.plugin.settings.completedTasks.push(taskId);
+                
+                const rewardsList = task.rewards.map(r => {
+                    const stat = this.plugin.settings.stats.find(s => s.id === r.statId);
+                    const finalAmount = r.earnedAmount || 0;
+                    return `${finalAmount > 0 ? '+' : ''}${finalAmount} ${stat ? stat.name : r.statId}`;
+                }).join(', ');
+                let rewardMsg = rewardsList ? ` (${rewardsList})` : '';
+                rewardMsg += ` +💰 ${coins} coin`;
+
+                if (penaltyInfo.isLate) {
+                    const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
+                    const statusMsg = penaltyInfo.multiplier < 0 ? `Bị trừ ${-Math.round(penaltyInfo.multiplier * 100)}% điểm` : `Giảm ${reductionPercent}% điểm`;
+                    new Notice(`⚠️ Hoàn thành trễ: ${task.text}${rewardMsg}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
+                } else {
+                    new Notice(`✅ Nhiệm vụ hoàn thành: ${task.text}${rewardMsg}`);
+                }
             } else {
                 this.plugin.applyUnreward(task);
                 const index = this.plugin.settings.completedTasks.indexOf(taskId);
                 if (index > -1) {
                     this.plugin.settings.completedTasks.splice(index, 1);
                 }
-            }
-
-            const rewardsList = task.rewards.map(r => {
-                const stat = this.plugin.settings.stats.find(s => s.id === r.statId);
-                const finalAmount = Math.round(r.amount * penaltyInfo.multiplier * 10) / 10;
-                return `${finalAmount > 0 ? '+' : ''}${finalAmount} ${stat ? stat.name : r.statId}`;
-            }).join(', ');
-            const rewardMsg = rewardsList ? ` (${rewardsList})` : '';
-
-            if (completed && penaltyInfo.isLate) {
-                const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
-                const statusMsg = penaltyInfo.multiplier < 0 ? `Bị trừ ${-Math.round(penaltyInfo.multiplier * 100)}% điểm` : `Giảm ${reductionPercent}% điểm`;
-                new Notice(`⚠️ Hoàn thành trễ: ${task.text}${rewardMsg}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
-            } else if (completed) {
-                new Notice(`✅ Nhiệm vụ hoàn thành: ${task.text}${rewardMsg}`);
             }
 
             await this.plugin.saveSettings(); // This will call refreshViews() and thus update()
@@ -269,7 +370,10 @@ export class LifeGaugeView extends ItemView {
             const newTitle = getCurrentTitle(newTotalXp, this.plugin.settings.titles);
 
             if (completed && newTitle.name !== currentTitle.name) {
-                new Notice(`🎉 CHÚC MỪNG! 🎉\nBạn đã đạt cấp độ mới: ${newTitle.name}!`, 5000);
+                this.plugin.settings.maxHunger += 50;
+                this.plugin.settings.hunger += 50;
+                new Notice(`🎉 CHÚC MỪNG! 🎉\nBạn đã đạt cấp độ mới: ${newTitle.name}!\nMax Satiety +50!`, 5000);
+                await this.plugin.saveSettings();
             }
         } finally {
             this.plugin.isInternalChange = false;
