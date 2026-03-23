@@ -287,7 +287,7 @@ export class LifeGaugeView extends ItemView {
 
                 // Rewards
                 if (task.rewards.length > 0) {
-                    const rewardsText = task.rewards.map(r => {
+                    let rewardsText = task.rewards.map(r => {
                         const stat = this.plugin.settings.stats.find(s => s.id === r.statId);
                         const label = stat ? stat.name : r.statId;
                         if (task.isProcessed && r.earnedAmount !== undefined) {
@@ -295,6 +295,10 @@ export class LifeGaugeView extends ItemView {
                         }
                         return label;
                     }).join(', ');
+
+                    if (task.isProcessed && task.earnedCoins !== undefined) {
+                        rewardsText += ` +💰 ${task.earnedCoins} coin`;
+                    }
                     meta.createEl('span', { text: `(${rewardsText})`, cls: 'lg-reward-text' });
                 }
 
@@ -321,12 +325,6 @@ export class LifeGaugeView extends ItemView {
 
         this.plugin.isInternalChange = true;
         try {
-            // 1. Update file content
-            const content = await this.app.vault.read(file);
-            const newContent = updateTaskInContent(content, task.originalLine, completed, completed);
-            await this.app.vault.modify(file, newContent);
-            this.plugin.lastKnownContent = newContent;
-
             // 2. Capture old state for rank up check
             const oldTotalXp = getTotalXp(this.plugin.settings.stats);
             const currentTitle = getCurrentTitle(oldTotalXp, this.plugin.settings.titles);
@@ -336,9 +334,12 @@ export class LifeGaugeView extends ItemView {
             const now = new Date();
             const penaltyInfo = this.plugin.getPenaltyInfo(task, now);
 
+            let rewardString = "";
             if (completed) {
                 const coins = this.plugin.applyReward(task, penaltyInfo);
+                task.earnedCoins = coins;
                 this.plugin.settings.completedTasks.push(taskId);
+                rewardString = this.plugin.getRewardString(task, coins);
                 
                 const rewardsList = task.rewards.map(r => {
                     const stat = this.plugin.settings.stats.find(s => s.id === r.statId);
@@ -362,6 +363,12 @@ export class LifeGaugeView extends ItemView {
                     this.plugin.settings.completedTasks.splice(index, 1);
                 }
             }
+
+            // 1. Update file content
+            const content = await this.app.vault.read(file);
+            const newContent = updateTaskInContent(content, task.originalLine, completed, completed, rewardString);
+            await this.app.vault.modify(file, newContent);
+            this.plugin.lastKnownContent = newContent;
 
             await this.plugin.saveSettings(); // This will call refreshViews() and thus update()
 

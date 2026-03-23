@@ -211,7 +211,7 @@ function parseTasks(content, stats) {
       const baseKey = `${remainingText}:${rewards.map((r) => r.statId).sort().join(",")}:${date || ""}:${time || ""}`;
       const occurrenceIndex = occurrenceMap.get(baseKey) || 0;
       occurrenceMap.set(baseKey, occurrenceIndex + 1);
-      tasks.push({
+      const task = {
         originalLine: index,
         text: remainingText,
         completed,
@@ -222,18 +222,42 @@ function parseTasks(content, stats) {
         isArchived: isArchivedSection,
         isProcessed,
         occurrenceIndex
-      });
+      };
+      if (isProcessed && index + 1 < lines.length) {
+        const nextLine = lines[index + 1];
+        const coinMatch = /\+💰\s*(\d+)/.exec(nextLine);
+        if (coinMatch) {
+          task.earnedCoins = parseInt(coinMatch[1]);
+        }
+        task.rewards.forEach((r) => {
+          const stat = stats.find((s) => s.id === r.statId);
+          if (stat) {
+            const xpRegex = new RegExp(`\\+([\\d.]+)\\s+${stat.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "i");
+            const xpMatch = xpRegex.exec(nextLine);
+            if (xpMatch) {
+              r.earnedAmount = parseFloat(xpMatch[1]);
+            }
+          }
+        });
+      }
+      tasks.push(task);
     }
   });
   return tasks;
 }
-function updateTaskInContent(content, lineIndex, completed, addDone = false) {
+function updateTaskInContent(content, lineIndex, completed, addDone = false, rewardText) {
   const lines = content.split("\n");
   if (lineIndex >= 0 && lineIndex < lines.length) {
     if (addDone) {
       lines[lineIndex] = lines[lineIndex].replace(/\[[ x]\]/, `[x]`);
       if (!lines[lineIndex].trim().endsWith("(done)")) {
         lines[lineIndex] = lines[lineIndex].trimEnd() + " (done)";
+      }
+      if (rewardText) {
+        const indentMatch = lines[lineIndex].match(/^(\s*)/);
+        const indent = indentMatch ? indentMatch[1] : "";
+        lines[lineIndex] = lines[lineIndex] + `
+${indent}  ${rewardText}`;
       }
     } else {
       const char = completed ? "x" : " ";
@@ -449,7 +473,7 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       if (task.rewards.length > 0 || task.skills.length > 0 || task.date || task.time) {
         const meta = textContainer.createEl("div", { cls: "lg-quest-meta" });
         if (task.rewards.length > 0) {
-          const rewardsText = task.rewards.map((r) => {
+          let rewardsText = task.rewards.map((r) => {
             const stat = this.plugin.settings.stats.find((s) => s.id === r.statId);
             const label = stat ? stat.name : r.statId;
             if (task.isProcessed && r.earnedAmount !== void 0) {
@@ -457,6 +481,9 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
             }
             return label;
           }).join(", ");
+          if (task.isProcessed && task.earnedCoins !== void 0) {
+            rewardsText += ` +\u{1F4B0} ${task.earnedCoins} coin`;
+          }
           meta.createEl("span", { text: `(${rewardsText})`, cls: "lg-reward-text" });
         }
         if (task.date || task.time) {
@@ -478,18 +505,17 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       return;
     this.plugin.isInternalChange = true;
     try {
-      const content = await this.app.vault.read(file);
-      const newContent = updateTaskInContent(content, task.originalLine, completed, completed);
-      await this.app.vault.modify(file, newContent);
-      this.plugin.lastKnownContent = newContent;
       const oldTotalXp = getTotalXp(this.plugin.settings.stats);
       const currentTitle = getCurrentTitle(oldTotalXp, this.plugin.settings.titles);
       const taskId = getTaskKey(task);
       const now = /* @__PURE__ */ new Date();
       const penaltyInfo = this.plugin.getPenaltyInfo(task, now);
+      let rewardString = "";
       if (completed) {
         const coins = this.plugin.applyReward(task, penaltyInfo);
+        task.earnedCoins = coins;
         this.plugin.settings.completedTasks.push(taskId);
+        rewardString = this.plugin.getRewardString(task, coins);
         const rewardsList = task.rewards.map((r) => {
           const stat = this.plugin.settings.stats.find((s) => s.id === r.statId);
           const finalAmount = r.earnedAmount || 0;
@@ -512,6 +538,10 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
           this.plugin.settings.completedTasks.splice(index, 1);
         }
       }
+      const content = await this.app.vault.read(file);
+      const newContent = updateTaskInContent(content, task.originalLine, completed, completed, rewardString);
+      await this.app.vault.modify(file, newContent);
+      this.plugin.lastKnownContent = newContent;
       await this.plugin.saveSettings();
       const newTotalXp = getTotalXp(this.plugin.settings.stats);
       const newTitle = getCurrentTitle(newTotalXp, this.plugin.settings.titles);
@@ -659,6 +689,14 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
       }
     });
   }
+  getRewardString(task, coins) {
+    const rewardsList = task.rewards.map((r) => {
+      const stat = this.settings.stats.find((s) => s.id === r.statId);
+      const finalAmount = r.earnedAmount || 0;
+      return `${finalAmount > 0 ? "+" : ""}${finalAmount} ${stat ? stat.name : r.statId}`;
+    }).join(" ");
+    return `${rewardsList} +\u{1F4B0} ${coins} coin`.trim();
+  }
   showRewardNotice(task, penaltyInfo) {
     const rewardsList = task.rewards.map((r) => {
       const stat = this.settings.stats.find((s) => s.id === r.statId);
@@ -697,6 +735,7 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
       const newlyCompleted = newTasks.filter((t) => t.completed && !t.isProcessed);
       for (const task of newlyCompleted) {
         const key = getTaskKey(task);
+        let rewardString = "";
         if (!this.settings.completedTasks.includes(key)) {
           const penaltyInfo = this.getPenaltyInfo(task, now);
           const oldTotalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
@@ -705,6 +744,7 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
           task.earnedCoins = coins;
           this.settings.completedTasks.push(key);
           this.showRewardNotice(task, penaltyInfo);
+          rewardString = this.getRewardString(task, coins);
           const newTotalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
           const newTitle = getCurrentTitle(newTotalXp, this.settings.titles);
           if (newTitle.name !== oldTitle.name) {
@@ -716,7 +756,7 @@ Max Satiety +50!`, 5e3);
           }
           changed = true;
         }
-        currentContent = updateTaskInContent(currentContent, task.originalLine, true, true);
+        currentContent = updateTaskInContent(currentContent, task.originalLine, true, true, rewardString);
         fileContentChanged = true;
       }
       const unprocessedOld = oldTasks.filter((t) => t.completed && !t.isProcessed);

@@ -149,6 +149,16 @@ export default class LifeGaugePlugin extends Plugin {
         });
     }
 
+    getRewardString(task: any, coins: number): string {
+        const rewardsList = task.rewards.map((r: any) => {
+            const stat = this.settings.stats.find(s => s.id === r.statId);
+            const finalAmount = r.earnedAmount || 0;
+            return `${finalAmount > 0 ? '+' : ''}${finalAmount} ${stat ? stat.name : r.statId}`;
+        }).join(' ');
+        
+        return `${rewardsList} +💰 ${coins} coin`.trim();
+    }
+
     showRewardNotice(task: any, penaltyInfo: { multiplier: number, isLate: boolean, minutesLate: number }) {
         const rewardsList = task.rewards.map((r: any) => {
             const stat = this.settings.stats.find(s => s.id === r.statId);
@@ -195,17 +205,18 @@ export default class LifeGaugePlugin extends Plugin {
             
             for (const task of newlyCompleted) {
                 const key = getTaskKey(task);
-                // Only reward if not already rewarded
+                let rewardString = "";
                 if (!this.settings.completedTasks.includes(key)) {
                     const penaltyInfo = this.getPenaltyInfo(task, now);
                     const oldTotalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
                     const oldTitle = getCurrentTitle(oldTotalXp, this.settings.titles);
 
                     const coins = this.applyReward(task, penaltyInfo);
-                    (task as any).earnedCoins = coins; // Temporary storage for notice
+                    task.earnedCoins = coins; // Store for notice and file logging
 
                     this.settings.completedTasks.push(key);
                     this.showRewardNotice(task, penaltyInfo);
+                    rewardString = this.getRewardString(task, coins);
 
                     const newTotalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
                     const newTitle = getCurrentTitle(newTotalXp, this.settings.titles);
@@ -219,7 +230,7 @@ export default class LifeGaugePlugin extends Plugin {
                 }
                 
                 // ALWAYS ensure (done) is added to the file
-                currentContent = updateTaskInContent(currentContent, task.originalLine, true, true);
+                currentContent = updateTaskInContent(currentContent, task.originalLine, true, true, rewardString);
                 fileContentChanged = true;
             }
 
