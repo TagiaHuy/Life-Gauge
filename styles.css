@@ -12,11 +12,33 @@
 /* Header */
 .lg-header {
     display: flex;
-    align-items: center;
-    gap: 16px;
+    flex-direction: column;
+    gap: 12px;
     padding-bottom: 20px;
     border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.lg-header-top-bar {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: var(--background-secondary-alt);
+    padding: 10px 14px;
+    border-radius: 10px;
     position: relative;
+    width: 100%;
+}
+
+.lg-coins-shop-group {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.lg-header-main {
+    display: flex;
+    align-items: center;
+    gap: 16px;
 }
 
 .lg-avatar-container {
@@ -66,17 +88,139 @@
 }
 
 .lg-settings-icon {
-    position: absolute;
-    top: 0;
-    right: 0;
     cursor: pointer;
     font-size: 1.2em;
     opacity: 0.6;
     transition: opacity 0.2s;
+    margin-left: auto;
 }
 
 .lg-settings-icon:hover {
     opacity: 1;
+}
+
+/* Header Stats (Removed old) */
+
+.lg-satiety-container {
+    flex-grow: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.lg-satiety-label {
+    font-size: 0.8em;
+    font-weight: bold;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.lg-bar-container.satiety {
+    height: 8px;
+    box-shadow: inset 0 1px 2px rgba(0,0,0,0.1);
+}
+
+.lg-satiety-value {
+    font-size: 0.75em;
+    color: var(--text-faint);
+    text-align: right;
+}
+
+.lg-coin-container {
+    display: flex;
+    align-items: center;
+    background: rgba(255, 204, 0, 0.1);
+    padding: 4px 8px;
+    border-radius: 6px;
+    border: 1px solid rgba(255, 204, 0, 0.3);
+}
+
+.lg-coin-text {
+    font-weight: bold;
+    color: #ffcc00;
+    font-size: 1.1em;
+}
+
+.lg-shop-btn {
+    background: var(--interactive-accent);
+    color: white;
+    border: none;
+    padding: 4px 12px;
+    border-radius: 6px;
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.lg-shop-btn:hover {
+    opacity: 0.8;
+}
+
+/* Shop UI */
+.lg-shop-container {
+    animation: fadeIn 0.3s ease-out;
+}
+
+.lg-back-btn {
+    margin-bottom: 16px;
+    background: var(--background-modifier-border);
+    border: none;
+    cursor: pointer;
+}
+
+.lg-shop-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 16px;
+}
+
+.lg-shop-card {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    padding: 16px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    transition: transform 0.2s;
+}
+
+.lg-shop-card:hover {
+    transform: translateY(-4px);
+    border-color: var(--interactive-accent);
+}
+
+.lg-shop-item-icon {
+    font-size: 2.5em;
+}
+
+.lg-shop-item-name {
+    font-weight: bold;
+    font-size: 1.1em;
+}
+
+.lg-shop-item-boost {
+    font-size: 0.85em;
+    color: var(--text-accent);
+}
+
+.lg-buy-btn {
+    width: 100%;
+    margin-top: 8px;
+    cursor: pointer;
+}
+
+.lg-buy-btn.is-disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 /* Stats */

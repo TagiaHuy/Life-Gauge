@@ -26,6 +26,10 @@ export interface LifeGaugeSettings {
     completedTasks: string[];
     penaltyPoint: number;
     refreshInterval: number;
+    hunger: number;
+    maxHunger: number;
+    coins: number;
+    lastHungerUpdate: number;
 }
 
 export const DEFAULT_STATS: Stat[] = [
@@ -108,7 +112,11 @@ export const DEFAULT_SETTINGS: LifeGaugeSettings = {
     skills: [],
     completedTasks: [],
     penaltyPoint: 1,
-    refreshInterval: 5
+    refreshInterval: 5,
+    hunger: 100,
+    maxHunger: 100,
+    coins: 0,
+    lastHungerUpdate: Date.now()
 };
 
 export function getRequiredXp(level: number, baseXp: number, xpIncrement: number): number {
