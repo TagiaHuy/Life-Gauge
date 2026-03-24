@@ -126,9 +126,9 @@ export class LifeGaugeView extends ItemView {
 
         if (nextTitle) {
             const neededForNext = nextTitle.threshold - totalXp;
-            info.createEl('div', { cls: 'lg-next-rank', text: `🔜 ${neededForNext} XP để trở thành ${nextTitle.name}` });
+            info.createEl('div', { cls: 'lg-next-rank', text: `🔜 ${neededForNext} XP to become ${nextTitle.name}` });
         } else {
-            info.createEl('div', { cls: 'lg-next-rank', text: `🏆 Bạn đã đạt đỉnh vinh quang!` });
+            info.createEl('div', { cls: 'lg-next-rank', text: `🏆 You have reached the pinnacle of glory!` });
         }
     }
 
@@ -212,10 +212,10 @@ export class LifeGaugeView extends ItemView {
 
         // --- Custom Rewards Section ---
         const customHeader = shopContainer.createEl('div', { cls: 'lg-shop-section-header' });
-        customHeader.createEl('h3', { text: '🎁 Phần thưởng tự chọn', cls: 'lg-shop-section-title' });
+        customHeader.createEl('h3', { text: '🎁 Custom Rewards', cls: 'lg-shop-section-title' });
         
         const addBtn = customHeader.createEl('button', { text: '➕', cls: 'lg-add-reward-btn' });
-        addBtn.setAttr('title', 'Thêm phần thưởng mới');
+        addBtn.setAttr('title', 'Add new reward');
         addBtn.addEventListener('click', () => {
             // We'll call a method on the plugin to show the modal
             (this.plugin as any).showAddRewardModal();
@@ -229,7 +229,7 @@ export class LifeGaugeView extends ItemView {
                 const card = customGrid.createEl('div', { cls: `lg-shop-card custom-reward ${isPurchased ? 'lg-purchased-item' : ''}` });
                 
                 if (isPurchased) {
-                    card.createEl('div', { text: '✅ Đã nhận', cls: 'lg-purchased-badge' });
+                    card.createEl('div', { text: '✅ Received', cls: 'lg-purchased-badge' });
                 }
 
                 card.createEl('div', { text: item.icon || '🎁', cls: 'lg-shop-item-icon' });
@@ -237,7 +237,7 @@ export class LifeGaugeView extends ItemView {
                 card.createEl('div', { text: item.description, cls: 'lg-shop-item-desc' });
                 
                 const buyBtn = card.createEl('button', { 
-                    text: isPurchased ? 'Dùng thêm' : `${item.cost} 💰 Nhận`, 
+                    text: isPurchased ? 'Get more' : `${item.cost} 💰 Claim`, 
                     cls: `lg-buy-btn ${isPurchased ? 'is-purchased' : ''}` 
                 });
                 
@@ -250,14 +250,14 @@ export class LifeGaugeView extends ItemView {
                     if (this.plugin.settings.coins >= item.cost) {
                         this.plugin.settings.coins -= item.cost;
                         this.purchasedItemIds.add(item.id);
-                        new Notice(`🎉 Chúc mừng! Bạn đã nhận phần thưởng: ${item.name}`);
+                        new Notice(`🎉 Congratulations! You have received the reward: ${item.name}`);
                         await this.plugin.saveSettings();
                         this.update();
                     }
                 });
             });
         } else {
-            shopContainer.createEl('div', { text: 'Chưa có vật phẩm tự chọn. Nhấn + để thêm!', cls: 'lg-no-items' });
+            shopContainer.createEl('div', { text: 'No custom items yet. Click + to add!', cls: 'lg-no-items' });
         }
     }
 
@@ -308,7 +308,7 @@ export class LifeGaugeView extends ItemView {
     }
 
     renderQuests(parent: HTMLElement, tasks: LifeGaugeTask[]) {
-        parent.createEl('h3', { text: 'Today quest', cls: 'lg-section-title' });
+        parent.createEl('h3', { text: 'Today\'s Quest', cls: 'lg-section-title' });
 
         const questHeader = parent.createEl('div', { cls: 'lg-quest-header' });
         // const refreshBtn = questHeader.createEl('button', { text: '🔄', cls: 'lg-refresh-btn' });
@@ -320,7 +320,7 @@ export class LifeGaugeView extends ItemView {
         const questList = parent.createEl('div', { cls: 'lg-quest-list' });
 
         if (tasks.length === 0) {
-            questList.createEl('div', { cls: 'lg-no-tasks', text: 'Không có nhiệm vụ nào hôm nay.' });
+            questList.createEl('div', { cls: 'lg-no-tasks', text: 'No quests for today.' });
             return;
         }
 
@@ -406,10 +406,10 @@ export class LifeGaugeView extends ItemView {
 
                 if (penaltyInfo.isLate) {
                     const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
-                    const statusMsg = penaltyInfo.multiplier < 0 ? `Bị trừ ${-Math.round(penaltyInfo.multiplier * 100)}% điểm` : `Giảm ${reductionPercent}% điểm`;
-                    new Notice(`⚠️ Hoàn thành trễ: ${task.text}${rewardMsg}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
+                    const statusMsg = penaltyInfo.multiplier < 0 ? `${-Math.round(penaltyInfo.multiplier * 100)}% points deducted` : `${reductionPercent}% points reduced`;
+                    new Notice(`⚠️ Completed Late: ${task.text}${rewardMsg}\n${statusMsg} due to delay of ${penaltyInfo.minutesLate} minutes.`, 5000);
                 } else {
-                    new Notice(`✅ Nhiệm vụ hoàn thành: ${task.text}${rewardMsg}`);
+                    new Notice(`✅ Mission Accomplished: ${task.text}${rewardMsg}`);
                 }
             } else {
                 this.plugin.applyUnreward(task);
@@ -434,7 +434,7 @@ export class LifeGaugeView extends ItemView {
             if (completed && newTitle.name !== currentTitle.name) {
                 this.plugin.settings.maxHunger += 50;
                 this.plugin.settings.hunger += 50;
-                new Notice(`🎉 CHÚC MỪNG! 🎉\nBạn đã đạt cấp độ mới: ${newTitle.name}!\nMax Satiety +50!`, 5000);
+                new Notice(`🎉 CONGRATULATIONS! 🎉\nYou have reached a new title: ${newTitle.name}!\nMax Satiety +50!`, 5000);
                 await this.plugin.saveSettings();
             }
         } finally {
