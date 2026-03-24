@@ -76,39 +76,39 @@ export const DEFAULT_STATS: Stat[] = [
 export const DEFAULT_TITLES: Title[] = [
     {
         threshold: 0,
-        name: "Kẻ lạc lõng",
+        name: "The Outcast",
         icon: "⚔️",
-        description: "Bạn luôn cảm thấy mình kém cỏi và bị bỏ lại. Bạn thất bại trong hầu hết mọi việc và bạn nghi ngờ khả năng của bản thân. Đừng từ bỏ, hãy tiếp tục cố gắng!"
+        description: "You always feel inadequate and left behind. You fail at most things and doubt your own abilities. Don't give up, keep trying!"
     },
     {
         threshold: 300,
-        name: "Người lữ khách",
+        name: "The Traveler",
         icon: "🚶",
-        description: "Bạn đã bắt đầu tìm thấy hướng đi. Những bước chân đầu tiên luôn khó khăn, nhưng mỗi ngày bạn lại vững vàng hơn."
+        description: "You've started to find your way. The first steps are always the hardest, but every day you become more steady."
     },
     {
         threshold: 800,
-        name: "Kẻ thức tỉnh",
+        name: "The Awakened",
         icon: "🔥",
-        description: "Một ngọn lửa nhỏ đã bùng cháy trong bạn. Bạn nhận ra rằng mình có thể làm được nhiều hơn những gì bạn nghĩ."
+        description: "A small fire has ignited within you. You realize that you can do more than you think."
     },
     {
         threshold: 1500,
-        name: "Chiến binh kiên cường",
+        name: "Resilient Warrior",
         icon: "🛡️",
-        description: "Những thử thách không còn làm bạn nao núng. Bạn đã rèn luyện đủ để đứng vững trước giông bão."
+        description: "Challenges no longer make you flinch. You have trained enough to stand firm in the storm."
     },
     {
         threshold: 3000,
-        name: "Bậc thầy",
+        name: "Master",
         icon: "👑",
-        description: "Kỹ năng của bạn đã trở thành huyền thoại trong cộng đồng của riêng bạn. Người khác nhìn vào bạn để tìm cảm hứng."
+        description: "Your skills have become legendary in your own community. Others look to you for inspiration."
     },
     {
         threshold: 5000,
-        name: "Huyền thoại sống",
+        name: "Living Legend",
         icon: "🌟",
-        description: "Bạn đã vượt qua giới hạn của con người thường. Câu chuyện của bạn sẽ được kể lại qua nhiều thế hệ."
+        description: "You have surpassed the limits of ordinary humans. Your story will be told for generations."
     }
 ];
 

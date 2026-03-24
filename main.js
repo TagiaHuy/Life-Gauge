@@ -71,39 +71,39 @@ var DEFAULT_STATS = [
 var DEFAULT_TITLES = [
   {
     threshold: 0,
-    name: "K\u1EBB l\u1EA1c l\xF5ng",
+    name: "The Outcast",
     icon: "\u2694\uFE0F",
-    description: "B\u1EA1n lu\xF4n c\u1EA3m th\u1EA5y m\xECnh k\xE9m c\u1ECFi v\xE0 b\u1ECB b\u1ECF l\u1EA1i. B\u1EA1n th\u1EA5t b\u1EA1i trong h\u1EA7u h\u1EBFt m\u1ECDi vi\u1EC7c v\xE0 b\u1EA1n nghi ng\u1EDD kh\u1EA3 n\u0103ng c\u1EE7a b\u1EA3n th\xE2n. \u0110\u1EEBng t\u1EEB b\u1ECF, h\xE3y ti\u1EBFp t\u1EE5c c\u1ED1 g\u1EAFng!"
+    description: "You always feel inadequate and left behind. You fail at most things and doubt your own abilities. Don't give up, keep trying!"
   },
   {
     threshold: 300,
-    name: "Ng\u01B0\u1EDDi l\u1EEF kh\xE1ch",
+    name: "The Traveler",
     icon: "\u{1F6B6}",
-    description: "B\u1EA1n \u0111\xE3 b\u1EAFt \u0111\u1EA7u t\xECm th\u1EA5y h\u01B0\u1EDBng \u0111i. Nh\u1EEFng b\u01B0\u1EDBc ch\xE2n \u0111\u1EA7u ti\xEAn lu\xF4n kh\xF3 kh\u0103n, nh\u01B0ng m\u1ED7i ng\xE0y b\u1EA1n l\u1EA1i v\u1EEFng v\xE0ng h\u01A1n."
+    description: "You've started to find your way. The first steps are always the hardest, but every day you become more steady."
   },
   {
     threshold: 800,
-    name: "K\u1EBB th\u1EE9c t\u1EC9nh",
+    name: "The Awakened",
     icon: "\u{1F525}",
-    description: "M\u1ED9t ng\u1ECDn l\u1EEDa nh\u1ECF \u0111\xE3 b\xF9ng ch\xE1y trong b\u1EA1n. B\u1EA1n nh\u1EADn ra r\u1EB1ng m\xECnh c\xF3 th\u1EC3 l\xE0m \u0111\u01B0\u1EE3c nhi\u1EC1u h\u01A1n nh\u1EEFng g\xEC b\u1EA1n ngh\u0129."
+    description: "A small fire has ignited within you. You realize that you can do more than you think."
   },
   {
     threshold: 1500,
-    name: "Chi\u1EBFn binh ki\xEAn c\u01B0\u1EDDng",
+    name: "Resilient Warrior",
     icon: "\u{1F6E1}\uFE0F",
-    description: "Nh\u1EEFng th\u1EED th\xE1ch kh\xF4ng c\xF2n l\xE0m b\u1EA1n nao n\xFAng. B\u1EA1n \u0111\xE3 r\xE8n luy\u1EC7n \u0111\u1EE7 \u0111\u1EC3 \u0111\u1EE9ng v\u1EEFng tr\u01B0\u1EDBc gi\xF4ng b\xE3o."
+    description: "Challenges no longer make you flinch. You have trained enough to stand firm in the storm."
   },
   {
     threshold: 3e3,
-    name: "B\u1EADc th\u1EA7y",
+    name: "Master",
     icon: "\u{1F451}",
-    description: "K\u1EF9 n\u0103ng c\u1EE7a b\u1EA1n \u0111\xE3 tr\u1EDF th\xE0nh huy\u1EC1n tho\u1EA1i trong c\u1ED9ng \u0111\u1ED3ng c\u1EE7a ri\xEAng b\u1EA1n. Ng\u01B0\u1EDDi kh\xE1c nh\xECn v\xE0o b\u1EA1n \u0111\u1EC3 t\xECm c\u1EA3m h\u1EE9ng."
+    description: "Your skills have become legendary in your own community. Others look to you for inspiration."
   },
   {
     threshold: 5e3,
-    name: "Huy\u1EC1n tho\u1EA1i s\u1ED1ng",
+    name: "Living Legend",
     icon: "\u{1F31F}",
-    description: "B\u1EA1n \u0111\xE3 v\u01B0\u1EE3t qua gi\u1EDBi h\u1EA1n c\u1EE7a con ng\u01B0\u1EDDi th\u01B0\u1EDDng. C\xE2u chuy\u1EC7n c\u1EE7a b\u1EA1n s\u1EBD \u0111\u01B0\u1EE3c k\u1EC3 l\u1EA1i qua nhi\u1EC1u th\u1EBF h\u1EC7."
+    description: "You have surpassed the limits of ordinary humans. Your story will be told for generations."
   }
 ];
 var DEFAULT_SETTINGS = {
@@ -355,9 +355,9 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     info.createEl("div", { cls: "lg-description", text: title.description });
     if (nextTitle) {
       const neededForNext = nextTitle.threshold - totalXp;
-      info.createEl("div", { cls: "lg-next-rank", text: `\u{1F51C} ${neededForNext} XP \u0111\u1EC3 tr\u1EDF th\xE0nh ${nextTitle.name}` });
+      info.createEl("div", { cls: "lg-next-rank", text: `\u{1F51C} ${neededForNext} XP to become ${nextTitle.name}` });
     } else {
-      info.createEl("div", { cls: "lg-next-rank", text: `\u{1F3C6} B\u1EA1n \u0111\xE3 \u0111\u1EA1t \u0111\u1EC9nh vinh quang!` });
+      info.createEl("div", { cls: "lg-next-rank", text: `\u{1F3C6} You have reached the pinnacle of glory!` });
     }
   }
   renderSatiety(parent) {
@@ -421,9 +421,9 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       });
     });
     const customHeader = shopContainer.createEl("div", { cls: "lg-shop-section-header" });
-    customHeader.createEl("h3", { text: "\u{1F381} Ph\u1EA7n th\u01B0\u1EDFng t\u1EF1 ch\u1ECDn", cls: "lg-shop-section-title" });
+    customHeader.createEl("h3", { text: "\u{1F381} Custom Rewards", cls: "lg-shop-section-title" });
     const addBtn = customHeader.createEl("button", { text: "\u2795", cls: "lg-add-reward-btn" });
-    addBtn.setAttr("title", "Th\xEAm ph\u1EA7n th\u01B0\u1EDFng m\u1EDBi");
+    addBtn.setAttr("title", "Add new reward");
     addBtn.addEventListener("click", () => {
       this.plugin.showAddRewardModal();
     });
@@ -433,13 +433,13 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
         const isPurchased = this.purchasedItemIds.has(item.id);
         const card = customGrid.createEl("div", { cls: `lg-shop-card custom-reward ${isPurchased ? "lg-purchased-item" : ""}` });
         if (isPurchased) {
-          card.createEl("div", { text: "\u2705 \u0110\xE3 nh\u1EADn", cls: "lg-purchased-badge" });
+          card.createEl("div", { text: "\u2705 Received", cls: "lg-purchased-badge" });
         }
         card.createEl("div", { text: item.icon || "\u{1F381}", cls: "lg-shop-item-icon" });
         card.createEl("div", { text: item.name, cls: "lg-shop-item-name" });
         card.createEl("div", { text: item.description, cls: "lg-shop-item-desc" });
         const buyBtn = card.createEl("button", {
-          text: isPurchased ? "D\xF9ng th\xEAm" : `${item.cost} \u{1F4B0} Nh\u1EADn`,
+          text: isPurchased ? "Get more" : `${item.cost} \u{1F4B0} Claim`,
           cls: `lg-buy-btn ${isPurchased ? "is-purchased" : ""}`
         });
         if (this.plugin.settings.coins < item.cost) {
@@ -450,14 +450,14 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
           if (this.plugin.settings.coins >= item.cost) {
             this.plugin.settings.coins -= item.cost;
             this.purchasedItemIds.add(item.id);
-            new import_obsidian.Notice(`\u{1F389} Ch\xFAc m\u1EEBng! B\u1EA1n \u0111\xE3 nh\u1EADn ph\u1EA7n th\u01B0\u1EDFng: ${item.name}`);
+            new import_obsidian.Notice(`\u{1F389} Congratulations! You have received the reward: ${item.name}`);
             await this.plugin.saveSettings();
             this.update();
           }
         });
       });
     } else {
-      shopContainer.createEl("div", { text: "Ch\u01B0a c\xF3 v\u1EADt ph\u1EA9m t\u1EF1 ch\u1ECDn. Nh\u1EA5n + \u0111\u1EC3 th\xEAm!", cls: "lg-no-items" });
+      shopContainer.createEl("div", { text: "No custom items yet. Click + to add!", cls: "lg-no-items" });
     }
   }
   renderStats(parent) {
@@ -497,11 +497,11 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     subText.createEl("span", { text: `Lv.${level}`, cls: "lg-level-text" });
   }
   renderQuests(parent, tasks) {
-    parent.createEl("h3", { text: "Today quest", cls: "lg-section-title" });
+    parent.createEl("h3", { text: "Today's Quest", cls: "lg-section-title" });
     const questHeader = parent.createEl("div", { cls: "lg-quest-header" });
     const questList = parent.createEl("div", { cls: "lg-quest-list" });
     if (tasks.length === 0) {
-      questList.createEl("div", { cls: "lg-no-tasks", text: "Kh\xF4ng c\xF3 nhi\u1EC7m v\u1EE5 n\xE0o h\xF4m nay." });
+      questList.createEl("div", { cls: "lg-no-tasks", text: "No quests for today." });
       return;
     }
     tasks.forEach((task) => {
@@ -569,11 +569,11 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
         rewardMsg += ` +\u{1F4B0} ${coins} coin`;
         if (penaltyInfo.isLate) {
           const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
-          const statusMsg = penaltyInfo.multiplier < 0 ? `B\u1ECB tr\u1EEB ${-Math.round(penaltyInfo.multiplier * 100)}% \u0111i\u1EC3m` : `Gi\u1EA3m ${reductionPercent}% \u0111i\u1EC3m`;
-          new import_obsidian.Notice(`\u26A0\uFE0F Ho\xE0n th\xE0nh tr\u1EC5: ${task.text}${rewardMsg}
-${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
+          const statusMsg = penaltyInfo.multiplier < 0 ? `${-Math.round(penaltyInfo.multiplier * 100)}% points deducted` : `${reductionPercent}% points reduced`;
+          new import_obsidian.Notice(`\u26A0\uFE0F Completed Late: ${task.text}${rewardMsg}
+${statusMsg} due to delay of ${penaltyInfo.minutesLate} minutes.`, 5e3);
         } else {
-          new import_obsidian.Notice(`\u2705 Nhi\u1EC7m v\u1EE5 ho\xE0n th\xE0nh: ${task.text}${rewardMsg}`);
+          new import_obsidian.Notice(`\u2705 Mission Accomplished: ${task.text}${rewardMsg}`);
         }
       } else {
         this.plugin.applyUnreward(task);
@@ -592,8 +592,8 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
       if (completed && newTitle.name !== currentTitle.name) {
         this.plugin.settings.maxHunger += 50;
         this.plugin.settings.hunger += 50;
-        new import_obsidian.Notice(`\u{1F389} CH\xDAC M\u1EEANG! \u{1F389}
-B\u1EA1n \u0111\xE3 \u0111\u1EA1t c\u1EA5p \u0111\u1ED9 m\u1EDBi: ${newTitle.name}!
+        new import_obsidian.Notice(`\u{1F389} CONGRATULATIONS! \u{1F389}
+You have reached a new title: ${newTitle.name}!
 Max Satiety +50!`, 5e3);
         await this.plugin.saveSettings();
       }
@@ -707,10 +707,10 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
     const hungerLost = elapsedMinutes * depletionRate;
     this.settings.hunger = Math.max(0, this.settings.hunger - hungerLost);
     this.settings.lastHungerUpdate = now;
-    if (this.settings.hunger < 30) {
-      const hoursElapsed = elapsedMinutes / 60;
-      const penaltyFactor = (30 - this.settings.hunger) / 30;
-      const xpLoss = hoursElapsed * penaltyFactor * 1;
+    const threshold = this.settings.maxHunger * 0.3;
+    if (this.settings.hunger < threshold) {
+      const intervalsElapsed = elapsedMinutes / 30;
+      const xpLoss = intervalsElapsed * this.settings.penaltyPoint * (threshold - this.settings.hunger) / 4;
       this.settings.stats.forEach((stat) => {
         stat.currentXp = Math.max(0, stat.currentXp - xpLoss);
       });
@@ -753,11 +753,11 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
     }
     if (penaltyInfo.isLate) {
       const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
-      const statusMsg = penaltyInfo.multiplier < 0 ? `B\u1ECB tr\u1EEB ${-Math.round(penaltyInfo.multiplier * 100)}% \u0111i\u1EC3m` : `Gi\u1EA3m ${reductionPercent}% \u0111i\u1EC3m`;
-      new import_obsidian2.Notice(`\u26A0\uFE0F Ho\xE0n th\xE0nh tr\u1EC5: ${task.text}${rewardMsg}
-${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
+      const statusMsg = penaltyInfo.multiplier < 0 ? `${-Math.round(penaltyInfo.multiplier * 100)}% points deducted` : `${reductionPercent}% points reduced`;
+      new import_obsidian2.Notice(`\u26A0\uFE0F Completed Late: ${task.text}${rewardMsg}
+${statusMsg} due to delay of ${penaltyInfo.minutesLate} minutes.`, 5e3);
     } else {
-      new import_obsidian2.Notice(`\u2705 Nhi\u1EC7m v\u1EE5 ho\xE0n th\xE0nh: ${task.text}${rewardMsg}`);
+      new import_obsidian2.Notice(`\u2705 Mission Accomplished: ${task.text}${rewardMsg}`);
     }
   }
   async syncTasksFromFile(file) {
@@ -794,8 +794,8 @@ ${statusMsg} do tr\u1EC5 ${penaltyInfo.minutesLate} ph\xFAt.`, 5e3);
           if (newTitle.name !== oldTitle.name) {
             this.settings.maxHunger += 50;
             this.settings.hunger += 50;
-            new import_obsidian2.Notice(`\u{1F389} CH\xDAC M\u1EEANG! \u{1F389}
-B\u1EA1n \u0111\xE3 \u0111\u1EA1t c\u1EA5p \u0111\u1ED9 m\u1EDBi: ${newTitle.name}!
+            new import_obsidian2.Notice(`\u{1F389} CONGRATULATIONS! \u{1F389}
+You have reached a new title: ${newTitle.name}!
 Max Satiety +50!`, 5e3);
           }
           changed = true;
@@ -900,7 +900,7 @@ var AddRewardModal = class extends import_obsidian2.Modal {
   constructor(app, plugin) {
     super(app);
     __publicField(this, "plugin");
-    __publicField(this, "name", "M\xF3n qu\xE0 m\u1EDBi");
+    __publicField(this, "name", "New Reward");
     __publicField(this, "icon", "\u{1F381}");
     __publicField(this, "description", "");
     __publicField(this, "cost", 50);
@@ -908,23 +908,23 @@ var AddRewardModal = class extends import_obsidian2.Modal {
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h2", { text: "Th\xEAm ph\u1EA7n th\u01B0\u1EDFng t\u1EF1 ch\u1ECDn" });
-    new import_obsidian2.Setting(contentEl).setName("T\xEAn ph\u1EA7n th\u01B0\u1EDFng").addText(
+    contentEl.createEl("h2", { text: "Add Custom Reward" });
+    new import_obsidian2.Setting(contentEl).setName("Reward Name").addText(
       (text) => text.setValue(this.name).onChange((value) => {
         this.name = value;
       })
     );
-    new import_obsidian2.Setting(contentEl).setName("Bi\u1EC3u t\u01B0\u1EE3ng (Icon)").addText(
+    new import_obsidian2.Setting(contentEl).setName("Icon").addText(
       (text) => text.setValue(this.icon).onChange((value) => {
         this.icon = value || "\u{1F381}";
       })
     );
-    new import_obsidian2.Setting(contentEl).setName("M\xF4 t\u1EA3").addText(
+    new import_obsidian2.Setting(contentEl).setName("Description").addText(
       (text) => text.setValue(this.description).onChange((value) => {
         this.description = value;
       })
     );
-    new import_obsidian2.Setting(contentEl).setName("Gi\xE1 (Coin)").addText(
+    new import_obsidian2.Setting(contentEl).setName("Cost (Coins)").addText(
       (text) => text.setValue(this.cost.toString()).onChange((value) => {
         const val = parseInt(value);
         if (!isNaN(val))
@@ -932,7 +932,7 @@ var AddRewardModal = class extends import_obsidian2.Modal {
       })
     );
     new import_obsidian2.Setting(contentEl).addButton(
-      (btn) => btn.setButtonText("Th\xEAm v\xE0o Shop").setCta().onClick(async () => {
+      (btn) => btn.setButtonText("Add to Shop").setCta().onClick(async () => {
         this.plugin.settings.customShopItems.push({
           id: `item-${Date.now()}`,
           name: this.name,
@@ -974,8 +974,8 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
       }
       await this.plugin.saveSettings();
     }));
-    containerEl.createEl("h3", { text: "\u{1F480} C\u1EA5u h\xECnh h\xECnh ph\u1EA1t" });
-    new import_obsidian2.Setting(containerEl).setName("H\u1EC7 s\u1ED1 h\xECnh ph\u1EA1t (Penalty Point)").setDesc("S\u1ED1 \u0111i\u1EC3m c\xE0ng cao, h\xECnh ph\u1EA1t tr\u1EC5 h\u1EA1n c\xE0ng n\u1EB7ng. C\xF4ng th\u1EE9c: Points - (Ph\xFAt tr\u1EC5 * Points / 100) * PenaltyPoint").addText((text) => text.setPlaceholder("1").setValue(this.plugin.settings.penaltyPoint.toString()).onChange(async (value) => {
+    containerEl.createEl("h3", { text: "\u{1F480} Penalty Configuration" });
+    new import_obsidian2.Setting(containerEl).setName("Penalty Multiplier (Penalty Point)").setDesc("Multiplier for all penalties. Higher values result in more XP lost for late tasks and hunger. \nFormula for late tasks: Points - (Min Late * Points / 100) * PenaltyPoint. \nFormula for hunger (per 30m): PenaltyPoint * (MaxSatiety * 0.3 - Satiety) / 4.").addText((text) => text.setPlaceholder("1").setValue(this.plugin.settings.penaltyPoint.toString()).onChange(async (value) => {
       const val = parseFloat(value);
       if (!isNaN(val)) {
         this.plugin.settings.penaltyPoint = val;
@@ -1086,7 +1086,7 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
         this.display();
       });
-      new import_obsidian2.Setting(titlesDetails).setName("T\xEAn danh hi\u1EC7u").addText((text) => text.setValue(title.name).onChange(async (value) => {
+      new import_obsidian2.Setting(titlesDetails).setName("Title Name").addText((text) => text.setValue(title.name).onChange(async (value) => {
         this.plugin.settings.titles[index].name = value;
         await this.plugin.saveSettings();
       }));
@@ -1094,32 +1094,32 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
         this.plugin.settings.titles[index].icon = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian2.Setting(titlesDetails).setName("M\u1ED1c XP (Threshold)").setDesc("L\u01B0\u1EE3ng XP c\u1EA7n \u0111\u1EA1t \u0111\u1EC3 nh\u1EADn danh hi\u1EC7u n\xE0y.").addText((text) => text.setValue(title.threshold.toString()).onChange(async (value) => {
+      new import_obsidian2.Setting(titlesDetails).setName("XP Threshold").setDesc("The amount of XP required to receive this title.").addText((text) => text.setValue(title.threshold.toString()).onChange(async (value) => {
         const val = parseInt(value);
         if (!isNaN(val)) {
           this.plugin.settings.titles[index].threshold = val;
           await this.plugin.saveSettings();
         }
       }));
-      new import_obsidian2.Setting(titlesDetails).setName("M\xF4 t\u1EA3").addTextArea((text) => text.setValue(title.description).onChange(async (value) => {
+      new import_obsidian2.Setting(titlesDetails).setName("Description").addTextArea((text) => text.setValue(title.description).onChange(async (value) => {
         this.plugin.settings.titles[index].description = value;
         await this.plugin.saveSettings();
       }));
       titlesDetails.createEl("hr");
     });
-    new import_obsidian2.Setting(titlesDetails).setName("Th\xEAm Danh hi\u1EC7u m\u1EDBi").addButton((btn) => btn.setButtonText("Th\xEAm Danh hi\u1EC7u").onClick(async () => {
+    new import_obsidian2.Setting(titlesDetails).setName("Add New Title").addButton((btn) => btn.setButtonText("Add Title").onClick(async () => {
       this.plugin.settings.titles.push({
         threshold: 0,
-        name: "Danh hi\u1EC7u m\u1EDBi",
+        name: "New Title",
         icon: "\u{1F195}",
-        description: "M\xF4 t\u1EA3 v\u1EC1 danh hi\u1EC7u n\xE0y..."
+        description: "Description for this title..."
       });
       await this.plugin.saveSettings();
       this.display();
     }));
     const customShopItemsDetails = containerEl.createEl("details", { cls: "lg-settings-details" });
     const customShopItemsSummary = customShopItemsDetails.createEl("summary");
-    customShopItemsSummary.createEl("h3", { text: "\u{1F381} C\u1EEDa h\xE0ng v\u1EADt ph\u1EA9m t\u1EF1 ch\u1ECDn", cls: "lg-settings-summary-title" });
+    customShopItemsSummary.createEl("h3", { text: "\u{1F381} Custom Reward Shop", cls: "lg-settings-summary-title" });
     this.plugin.settings.customShopItems.forEach((item, index) => {
       const itemHeader = customShopItemsDetails.createEl("div", { cls: "lg-setting-stat-header" });
       itemHeader.style.display = "flex";
@@ -1127,25 +1127,25 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
       itemHeader.style.alignItems = "center";
       const itemTitle = itemHeader.createEl("h4", { text: item.name });
       itemTitle.style.margin = "0";
-      const deleteBtn = itemHeader.createEl("button", { text: "X\xF3a", cls: "mod-warning" });
+      const deleteBtn = itemHeader.createEl("button", { text: "Delete", cls: "mod-warning" });
       deleteBtn.addEventListener("click", async () => {
         this.plugin.settings.customShopItems.splice(index, 1);
         await this.plugin.saveSettings();
         this.display();
       });
-      new import_obsidian2.Setting(customShopItemsDetails).setName("T\xEAn v\u1EADt ph\u1EA9m").addText((text) => text.setValue(item.name).onChange(async (value) => {
+      new import_obsidian2.Setting(customShopItemsDetails).setName("Item Name").addText((text) => text.setValue(item.name).onChange(async (value) => {
         this.plugin.settings.customShopItems[index].name = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian2.Setting(customShopItemsDetails).setName("Bi\u1EC3u t\u01B0\u1EE3ng (Icon)").addText((text) => text.setValue(item.icon).setPlaceholder("\u{1F381}").onChange(async (value) => {
+      new import_obsidian2.Setting(customShopItemsDetails).setName("Icon").addText((text) => text.setValue(item.icon).setPlaceholder("\u{1F381}").onChange(async (value) => {
         this.plugin.settings.customShopItems[index].icon = value || "\u{1F381}";
         await this.plugin.saveSettings();
       }));
-      new import_obsidian2.Setting(customShopItemsDetails).setName("M\xF4 t\u1EA3").addText((text) => text.setValue(item.description).onChange(async (value) => {
+      new import_obsidian2.Setting(customShopItemsDetails).setName("Description").addText((text) => text.setValue(item.description).onChange(async (value) => {
         this.plugin.settings.customShopItems[index].description = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian2.Setting(customShopItemsDetails).setName("Gi\xE1 (Coin)").addText((text) => text.setValue(item.cost.toString()).onChange(async (value) => {
+      new import_obsidian2.Setting(customShopItemsDetails).setName("Cost (Coins)").addText((text) => text.setValue(item.cost.toString()).onChange(async (value) => {
         const val = parseInt(value);
         if (!isNaN(val)) {
           this.plugin.settings.customShopItems[index].cost = val;
@@ -1154,12 +1154,12 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
       }));
       customShopItemsDetails.createEl("hr");
     });
-    new import_obsidian2.Setting(customShopItemsDetails).setName("Th\xEAm v\u1EADt ph\u1EA9m m\u1EDBi").addButton((btn) => btn.setButtonText("Th\xEAm V\u1EADt ph\u1EA9m").onClick(async () => {
+    new import_obsidian2.Setting(customShopItemsDetails).setName("Add New Item").addButton((btn) => btn.setButtonText("Add Item").onClick(async () => {
       this.plugin.settings.customShopItems.push({
         id: `item-${Date.now()}`,
-        name: "Ph\u1EA7n th\u01B0\u1EDFng m\u1EDBi",
+        name: "New Reward",
         icon: "\u{1F381}",
-        description: "M\xF4 t\u1EA3 ph\u1EA7n th\u01B0\u1EDFng...",
+        description: "Reward description...",
         cost: 50
       });
       await this.plugin.saveSettings();

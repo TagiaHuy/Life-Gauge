@@ -119,12 +119,13 @@ export default class LifeGaugePlugin extends Plugin {
         this.settings.hunger = Math.max(0, this.settings.hunger - hungerLost);
         this.settings.lastHungerUpdate = now;
 
-        // Red zone penalty (below 30%)
-        if (this.settings.hunger < 30) {
-            const hoursElapsed = elapsedMinutes / 60;
-            // Penalty = (30 - Hunger) / 30 * MaxPenalty (1 XP per hour)
-            const penaltyFactor = (30 - this.settings.hunger) / 30;
-            const xpLoss = hoursElapsed * penaltyFactor * 1;
+        // Red zone penalty (below 30% of max hunger)
+        const threshold = this.settings.maxHunger * 0.3;
+        if (this.settings.hunger < threshold) {
+            const intervalsElapsed = elapsedMinutes / 30; // Base time unit: 30 minutes
+            
+            // Adjusted Formula: xpLoss (per 30m) = penaltyPoint * (threshold - satiety) / 4
+            const xpLoss = intervalsElapsed * this.settings.penaltyPoint * (threshold - this.settings.hunger) / 4;
 
             this.settings.stats.forEach(stat => {
                 stat.currentXp = Math.max(0, stat.currentXp - xpLoss);
@@ -173,10 +174,10 @@ export default class LifeGaugePlugin extends Plugin {
 
         if (penaltyInfo.isLate) {
             const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
-            const statusMsg = penaltyInfo.multiplier < 0 ? `Bị trừ ${-Math.round(penaltyInfo.multiplier * 100)}% điểm` : `Giảm ${reductionPercent}% điểm`;
-            new Notice(`⚠️ Hoàn thành trễ: ${task.text}${rewardMsg}\n${statusMsg} do trễ ${penaltyInfo.minutesLate} phút.`, 5000);
+            const statusMsg = penaltyInfo.multiplier < 0 ? `${-Math.round(penaltyInfo.multiplier * 100)}% points deducted` : `${reductionPercent}% points reduced`;
+            new Notice(`⚠️ Completed Late: ${task.text}${rewardMsg}\n${statusMsg} due to delay of ${penaltyInfo.minutesLate} minutes.`, 5000);
         } else {
-            new Notice(`✅ Nhiệm vụ hoàn thành: ${task.text}${rewardMsg}`);
+            new Notice(`✅ Mission Accomplished: ${task.text}${rewardMsg}`);
         }
     }
 
@@ -223,7 +224,7 @@ export default class LifeGaugePlugin extends Plugin {
                     if (newTitle.name !== oldTitle.name) {
                         this.settings.maxHunger += 50;
                         this.settings.hunger += 50;
-                        new Notice(`🎉 CHÚC MỪNG! 🎉\nBạn đã đạt cấp độ mới: ${newTitle.name}!\nMax Satiety +50!`, 5000);
+                        new Notice(`🎉 CONGRATULATIONS! 🎉\nYou have reached a new title: ${newTitle.name}!\nMax Satiety +50!`, 5000);
                     }
 
                     changed = true;
@@ -351,7 +352,7 @@ export default class LifeGaugePlugin extends Plugin {
 
 class AddRewardModal extends Modal {
     plugin: LifeGaugePlugin;
-    name: string = "Món quà mới";
+    name: string = "New Reward";
     icon: string = "🎁";
     description: string = "";
     cost: number = 50;
@@ -363,10 +364,10 @@ class AddRewardModal extends Modal {
 
     onOpen() {
         const { contentEl } = this;
-        contentEl.createEl("h2", { text: "Thêm phần thưởng tự chọn" });
+        contentEl.createEl("h2", { text: "Add Custom Reward" });
 
         new Setting(contentEl)
-            .setName("Tên phần thưởng")
+            .setName("Reward Name")
             .addText((text) =>
                 text.setValue(this.name).onChange((value) => {
                     this.name = value;
@@ -374,7 +375,7 @@ class AddRewardModal extends Modal {
             );
 
         new Setting(contentEl)
-            .setName("Biểu tượng (Icon)")
+            .setName("Icon")
             .addText((text) =>
                 text.setValue(this.icon).onChange((value) => {
                     this.icon = value || "🎁";
@@ -382,7 +383,7 @@ class AddRewardModal extends Modal {
             );
 
         new Setting(contentEl)
-            .setName("Mô tả")
+            .setName("Description")
             .addText((text) =>
                 text.setValue(this.description).onChange((value) => {
                     this.description = value;
@@ -390,7 +391,7 @@ class AddRewardModal extends Modal {
             );
 
         new Setting(contentEl)
-            .setName("Giá (Coin)")
+            .setName("Cost (Coins)")
             .addText((text) =>
                 text.setValue(this.cost.toString()).onChange((value) => {
                     const val = parseInt(value);
@@ -400,7 +401,7 @@ class AddRewardModal extends Modal {
 
         new Setting(contentEl).addButton((btn) =>
             btn
-                .setButtonText("Thêm vào Shop")
+                .setButtonText("Add to Shop")
                 .setCta()
                 .onClick(async () => {
                     this.plugin.settings.customShopItems.push({
@@ -463,10 +464,10 @@ class LifeGaugeSettingTab extends PluginSettingTab {
                 }));
 
 
-        containerEl.createEl('h3', { text: '💀 Cấu hình hình phạt' });
+        containerEl.createEl('h3', { text: '💀 Penalty Configuration' });
         new Setting(containerEl)
-            .setName('Hệ số hình phạt (Penalty Point)')
-            .setDesc('Số điểm càng cao, hình phạt trễ hạn càng nặng. Công thức: Points - (Phút trễ * Points / 100) * PenaltyPoint')
+            .setName('Penalty Multiplier (Penalty Point)')
+            .setDesc('Multiplier for all penalties. Higher values result in more XP lost for late tasks and hunger. \nFormula for late tasks: Points - (Min Late * Points / 100) * PenaltyPoint. \nFormula for hunger (per 30m): PenaltyPoint * (MaxSatiety * 0.3 - Satiety) / 4.')
             .addText(text => text
                 .setPlaceholder('1')
                 .setValue(this.plugin.settings.penaltyPoint.toString())
@@ -640,7 +641,7 @@ class LifeGaugeSettingTab extends PluginSettingTab {
             });
 
             new Setting(titlesDetails)
-                .setName('Tên danh hiệu')
+                .setName('Title Name')
                 .addText(text => text
                     .setValue(title.name)
                     .onChange(async (value) => {
@@ -658,8 +659,8 @@ class LifeGaugeSettingTab extends PluginSettingTab {
                     }));
 
             new Setting(titlesDetails)
-                .setName('Mốc XP (Threshold)')
-                .setDesc('Lượng XP cần đạt để nhận danh hiệu này.')
+                .setName('XP Threshold')
+                .setDesc('The amount of XP required to receive this title.')
                 .addText(text => text
                     .setValue(title.threshold.toString())
                     .onChange(async (value) => {
@@ -671,7 +672,7 @@ class LifeGaugeSettingTab extends PluginSettingTab {
                     }));
 
             new Setting(titlesDetails)
-                .setName('Mô tả')
+                .setName('Description')
                 .addTextArea(text => text
                     .setValue(title.description)
                     .onChange(async (value) => {
@@ -683,15 +684,15 @@ class LifeGaugeSettingTab extends PluginSettingTab {
         });
 
         new Setting(titlesDetails)
-            .setName('Thêm Danh hiệu mới')
+            .setName('Add New Title')
             .addButton(btn => btn
-                .setButtonText('Thêm Danh hiệu')
+                .setButtonText('Add Title')
                 .onClick(async () => {
                     this.plugin.settings.titles.push({
                         threshold: 0,
-                        name: 'Danh hiệu mới',
+                        name: 'New Title',
                         icon: '🆕',
-                        description: 'Mô tả về danh hiệu này...'
+                        description: 'Description for this title...'
                     });
                     await this.plugin.saveSettings();
                     this.display();
@@ -699,7 +700,7 @@ class LifeGaugeSettingTab extends PluginSettingTab {
 
         const customShopItemsDetails = containerEl.createEl('details', { cls: 'lg-settings-details' });
         const customShopItemsSummary = customShopItemsDetails.createEl('summary');
-        customShopItemsSummary.createEl('h3', { text: '🎁 Cửa hàng vật phẩm tự chọn', cls: 'lg-settings-summary-title' });
+        customShopItemsSummary.createEl('h3', { text: '🎁 Custom Reward Shop', cls: 'lg-settings-summary-title' });
 
         this.plugin.settings.customShopItems.forEach((item, index) => {
             const itemHeader = customShopItemsDetails.createEl('div', { cls: 'lg-setting-stat-header' });
@@ -710,7 +711,7 @@ class LifeGaugeSettingTab extends PluginSettingTab {
             const itemTitle = itemHeader.createEl('h4', { text: item.name });
             itemTitle.style.margin = '0';
             
-            const deleteBtn = itemHeader.createEl('button', { text: 'Xóa', cls: 'mod-warning' });
+            const deleteBtn = itemHeader.createEl('button', { text: 'Delete', cls: 'mod-warning' });
             deleteBtn.addEventListener('click', async () => {
                 this.plugin.settings.customShopItems.splice(index, 1);
                 await this.plugin.saveSettings();
@@ -718,7 +719,7 @@ class LifeGaugeSettingTab extends PluginSettingTab {
             });
 
             new Setting(customShopItemsDetails)
-                .setName('Tên vật phẩm')
+                .setName('Item Name')
                 .addText(text => text
                     .setValue(item.name)
                     .onChange(async (value) => {
@@ -727,7 +728,7 @@ class LifeGaugeSettingTab extends PluginSettingTab {
                     }));
 
             new Setting(customShopItemsDetails)
-                .setName('Biểu tượng (Icon)')
+                .setName('Icon')
                 .addText(text => text
                     .setValue(item.icon)
                     .setPlaceholder('🎁')
@@ -737,7 +738,7 @@ class LifeGaugeSettingTab extends PluginSettingTab {
                     }));
 
             new Setting(customShopItemsDetails)
-                .setName('Mô tả')
+                .setName('Description')
                 .addText(text => text
                     .setValue(item.description)
                     .onChange(async (value) => {
@@ -746,7 +747,7 @@ class LifeGaugeSettingTab extends PluginSettingTab {
                     }));
 
             new Setting(customShopItemsDetails)
-                .setName('Giá (Coin)')
+                .setName('Cost (Coins)')
                 .addText(text => text
                     .setValue(item.cost.toString())
                     .onChange(async (value) => {
@@ -761,15 +762,15 @@ class LifeGaugeSettingTab extends PluginSettingTab {
         });
 
         new Setting(customShopItemsDetails)
-            .setName('Thêm vật phẩm mới')
+            .setName('Add New Item')
             .addButton(btn => btn
-                .setButtonText('Thêm Vật phẩm')
+                .setButtonText('Add Item')
                 .onClick(async () => {
                     this.plugin.settings.customShopItems.push({
                         id: `item-${Date.now()}`,
-                        name: 'Phần thưởng mới',
+                        name: 'New Reward',
                         icon: '🎁',
-                        description: 'Mô tả phần thưởng...',
+                        description: 'Reward description...',
                         cost: 50
                     });
                     await this.plugin.saveSettings();
