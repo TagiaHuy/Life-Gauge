@@ -636,7 +636,6 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       bar.style.height = `${Math.max(2, percent)}%`;
       barWrap.createEl("div", { text: d.label.toString(), cls: "lg-bar-label" });
     });
-    statsTab.createEl("h3", { text: "\u{1F4CB} Recent History", cls: "lg-section-title" });
     this.renderStatistics(statsTab);
   }
   renderStatistics(parent) {

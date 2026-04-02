@@ -465,8 +465,7 @@ export class LifeGaugeView extends ItemView {
             barWrap.createEl('div', { text: d.label.toString(), cls: 'lg-bar-label' });
         });
 
-        // --- Detailed History (Current renderingStatistics logic) ---
-        statsTab.createEl('h3', { text: '📋 Recent History', cls: 'lg-section-title' });
+        // --- Detailed History (Daily Progress) ---
         this.renderStatistics(statsTab);
     }
 
