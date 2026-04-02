@@ -1,5 +1,5 @@
 import { ItemView, WorkspaceLeaf, TFile, normalizePath, Notice } from 'obsidian';
-import { Stat, Title, getTotalXp, getCurrentTitle, getNextTitle, calculateLevel, getRequiredXp } from './data';
+import { Stat, Title, getTotalXp, getCurrentTitle, getNextTitle, calculateLevel, getRequiredXp, formatDate } from './data';
 import { parseTasks, updateTaskInContent, LifeGaugeTask, getTaskKey } from './parser';
 import LifeGaugePlugin from '../main';
 
@@ -9,6 +9,7 @@ export class LifeGaugeView extends ItemView {
     plugin: LifeGaugePlugin;
     tasks: LifeGaugeTask[] = [];
     isUpdating = false;
+    activeTab: 'main' | 'shop' | 'stats' = 'main';
 
     constructor(leaf: WorkspaceLeaf, plugin: LifeGaugePlugin) {
         super(leaf);
@@ -53,21 +54,19 @@ export class LifeGaugeView extends ItemView {
 
             this.renderHeader(contentEl, title, nextTitle, totalXp);
 
-            if (this.showShop) {
+            // Tab rendering
+            if (this.activeTab === 'shop') {
                 this.renderShop(contentEl);
-                return;
+            } else if (this.activeTab === 'stats') {
+                this.renderStatsTab(contentEl);
+            } else {
+                // Main / Dashboard tab
+                this.renderStats(contentEl);
+                if (this.plugin.settings.skills.length > 0) {
+                    this.renderSkills(contentEl);
+                }
+                this.renderQuests(contentEl, visibleTasks);
             }
-
-            // Stats section
-            this.renderStats(contentEl);
-
-            // Skills section (New)
-            if (this.plugin.settings.skills.length > 0) {
-                this.renderSkills(contentEl);
-            }
-
-            // Quests section
-            this.renderQuests(contentEl, visibleTasks);
         } catch (e) {
             console.error('Life Gauge: Update failed', e);
         } finally {
@@ -94,19 +93,35 @@ export class LifeGaugeView extends ItemView {
         // Satiety Bar
         this.renderSatiety(topBar);
 
-        // Coins & Shop
-        const coinsShopGroup = topBar.createEl('div', { cls: 'lg-coins-shop-group' });
-        const coinContainer = coinsShopGroup.createEl('div', { cls: 'lg-coin-container' });
+        // Coins & Settings
+        const coinsSettingsGroup = topBar.createEl('div', { cls: 'lg-coins-shop-group' });
+        const coinContainer = coinsSettingsGroup.createEl('div', { cls: 'lg-coin-container' });
         coinContainer.createEl('span', { text: `💰 ${Math.floor(this.plugin.settings.coins)}`, cls: 'lg-coin-text' });
 
-        const shopBtn = coinsShopGroup.createEl('button', { text: '🏪 Shop', cls: 'lg-shop-btn' });
-        shopBtn.addEventListener('click', () => this.toggleShop());
-
         // Settings icon
-        const settingsIcon = topBar.createEl('div', { cls: 'lg-settings-icon', text: '⚙️' });
+        const settingsIcon = coinsSettingsGroup.createEl('div', { cls: 'lg-settings-icon', text: '⚙️' });
         settingsIcon.addEventListener('click', () => {
             (this.app as any).setting.open();
             (this.app as any).setting.openTabById(this.plugin.manifest.id);
+        });
+
+        // --- Tab Navigation ---
+        const tabNav = header.createEl('div', { cls: 'lg-tab-nav' });
+        
+        const tabs: {id: typeof LifeGaugeView.prototype.activeTab, name: string, icon: string}[] = [
+            { id: 'main', name: 'Dashboard', icon: '🏠' },
+            { id: 'shop', name: 'Shop', icon: '🏪' },
+            { id: 'stats', name: 'Stats', icon: '📊' }
+        ];
+
+        tabs.forEach(t => {
+            const tabBtn = tabNav.createEl('button', { cls: `lg-tab-btn ${this.activeTab === t.id ? 'is-active' : ''}` });
+            tabBtn.createEl('span', { text: t.icon, cls: 'lg-tab-icon' });
+            tabBtn.createEl('span', { text: t.name, cls: 'lg-tab-name' });
+            tabBtn.addEventListener('click', () => {
+                this.activeTab = t.id;
+                this.update();
+            });
         });
 
         // --- Main Info (Avatar + Nickname) ---
@@ -116,13 +131,38 @@ export class LifeGaugeView extends ItemView {
         const avatarContainer = mainInfo.createEl('div', { cls: 'lg-avatar-container' });
         const avatar = avatarContainer.createEl('img', {
             cls: 'lg-avatar',
-            attr: { src: this.app.vault.adapter.getResourcePath(this.plugin.settings.avatarPath) }
+            attr: { 
+                src: this.app.vault.adapter.getResourcePath(this.plugin.settings.avatarPath),
+                title: this.plugin.settings.ai.enabled ? `Click to talk to ${this.plugin.settings.ai.name}` : ""
+            }
         });
+
+        if (this.plugin.settings.ai.enabled) {
+            avatar.addEventListener('click', async () => {
+                new Notice(`${this.plugin.settings.ai.name} is thinking...`);
+                await this.plugin.triggerAiAnalysis("I'm checking in on you!");
+                new Notice(`${this.plugin.settings.ai.name} has spoken!`);
+                this.update(); // Refresh view to show new response
+            });
+        }
 
         // Info
         const info = mainInfo.createEl('div', { cls: 'lg-info' });
-        info.createEl('div', { cls: 'lg-nickname', text: `${title.icon} ${title.name.toUpperCase()} ${title.icon}` });
-        info.createEl('div', { cls: 'lg-description', text: title.description });
+        
+        let displayName = `${title.icon} ${title.name.toUpperCase()} ${title.icon}`;
+        let displayDesc = title.description;
+
+        if (this.plugin.settings.ai.enabled) {
+            displayName = this.plugin.settings.ai.name.toUpperCase();
+            displayDesc = this.plugin.settings.lastAiResponse;
+        }
+
+        info.createEl('div', { cls: 'lg-nickname', text: displayName });
+        info.createEl('div', { cls: 'lg-description', text: displayDesc });
+
+        if (this.plugin.settings.ai.enabled) {
+            return; // Skip rank info if AI is enabled
+        }
 
         if (nextTitle) {
             const neededForNext = nextTitle.threshold - totalXp;
@@ -156,23 +196,11 @@ export class LifeGaugeView extends ItemView {
         container.createEl('div', { text: `${Math.floor(hunger)} / ${maxHunger}`, cls: 'lg-satiety-value' });
     }
 
-    showShop = false;
     purchasedItemIds = new Set<string>();
-
-    toggleShop() {
-        this.showShop = !this.showShop;
-        if (!this.showShop) {
-            this.purchasedItemIds.clear();
-        }
-        this.update();
-    }
 
     renderShop(parent: HTMLElement) {
         const shopContainer = parent.createEl('div', { cls: 'lg-shop-container' });
         shopContainer.createEl('h3', { text: '🏪 Food Shop', cls: 'lg-section-title' });
-
-        const backBtn = shopContainer.createEl('button', { text: '⬅️ Back to Dashboard', cls: 'lg-back-btn' });
-        backBtn.addEventListener('click', () => this.toggleShop());
 
         const shopGrid = shopContainer.createEl('div', { cls: 'lg-shop-grid' });
 
@@ -372,6 +400,97 @@ export class LifeGaugeView extends ItemView {
         });
     }
 
+    renderStatsTab(parent: HTMLElement) {
+        const statsTab = parent.createEl('div', { cls: 'lg-stats-tab' });
+        statsTab.createEl('h3', { text: '📊 XP Statistics', cls: 'lg-section-title' });
+
+        // --- Bar Chart ---
+        const chartContainer = statsTab.createEl('div', { cls: 'lg-chart-container' });
+        const daysToShow = 14;
+        const data = [];
+        let maxDailyXp = 50; // Minimum scale height
+
+        for (let i = daysToShow - 1; i >= 0; i--) {
+            const date = new Date();
+            date.setDate(date.getDate() - i);
+            const dateStr = formatDate(date);
+            const dayLogs = this.plugin.settings.dailyXpLogs[dateStr] || {};
+            
+            let dailyTotal = 0;
+            Object.values(dayLogs).forEach(val => dailyTotal += val);
+            
+            data.push({
+                label: i === 0 ? 'Today' : date.getDate(),
+                totalXp: dailyTotal,
+                dateStr: dateStr
+            });
+            maxDailyXp = Math.max(maxDailyXp, Math.abs(dailyTotal));
+        }
+
+        const chartBody = chartContainer.createEl('div', { cls: 'lg-chart-body' });
+        
+        data.forEach(d => {
+            const barWrap = chartBody.createEl('div', { cls: 'lg-bar-wrap' });
+            const percent = (Math.abs(d.totalXp) / maxDailyXp) * 100;
+            
+            const bar = barWrap.createEl('div', { 
+                cls: `lg-bar ${d.totalXp >= 0 ? 'is-positive' : 'is-negative'}`,
+                attr: { title: `${d.dateStr}: ${Math.round(d.totalXp * 10) / 10} XP` }
+            });
+            bar.style.height = `${Math.max(2, percent)}%`;
+            
+            barWrap.createEl('div', { text: d.label.toString(), cls: 'lg-bar-label' });
+        });
+
+        // --- Detailed History (Current renderingStatistics logic) ---
+        statsTab.createEl('h3', { text: '📋 Recent History', cls: 'lg-section-title' });
+        this.renderStatistics(statsTab);
+    }
+
+    renderStatistics(parent: HTMLElement) {
+        const statsSection = parent.createEl('div', { cls: 'lg-statistics-section' });
+        statsSection.createEl('h3', { text: '📊 Daily Progress (Last 7 Days)', cls: 'lg-section-title' });
+
+        const statsGrid = statsSection.createEl('div', { cls: 'lg-stats-grid-daily' });
+
+        // Get last 7 days
+        for (let i = 0; i < 7; i++) {
+            const date = new Date();
+            date.setDate(date.getDate() - i);
+            const dateStr = formatDate(date);
+            const dayLogs = this.plugin.settings.dailyXpLogs[dateStr] || {};
+            
+            let dailyTotal = 0;
+            Object.values(dayLogs).forEach(val => dailyTotal += val);
+
+            const dayCard = statsGrid.createEl('div', { cls: 'lg-daily-stat-card' });
+            const dayLabel = i === 0 ? "Today" : i === 1 ? "Yesterday" : dateStr;
+            dayCard.createEl('div', { text: dayLabel, cls: 'lg-daily-date' });
+            
+            const totalXp = Math.round(dailyTotal * 10) / 10;
+            const xpText = dayCard.createEl('div', { text: `${totalXp > 0 ? '+' : ''}${totalXp} XP`, cls: 'lg-daily-xp' });
+            
+            if (totalXp > 0) {
+                xpText.addClass('xp-positive');
+            } else if (totalXp < 0) {
+                xpText.addClass('xp-negative');
+            }
+
+            // Detail view (mini)
+            if (Object.keys(dayLogs).length > 0) {
+                const details = dayCard.createEl('div', { cls: 'lg-daily-details' });
+                Object.entries(dayLogs).forEach(([id, amount]) => {
+                    if (Math.abs(amount) < 0.1) return;
+                    const stat = this.plugin.settings.stats.find(s => s.id === id) || 
+                                 this.plugin.settings.skills.find(s => s.id === id || s.name === id);
+                    const name = stat ? stat.name : id;
+                    const roundedAmount = Math.round(amount * 10) / 10;
+                    details.createEl('div', { text: `${name}: ${roundedAmount > 0 ? '+' : ''}${roundedAmount}`, cls: 'lg-daily-stat-item' });
+                });
+            }
+        }
+    }
+
     async handleTaskToggle(task: LifeGaugeTask, completed: boolean) {
         if (task.isProcessed) return;
 
@@ -432,9 +551,7 @@ export class LifeGaugeView extends ItemView {
             const newTitle = getCurrentTitle(newTotalXp, this.plugin.settings.titles);
 
             if (completed && newTitle.name !== currentTitle.name) {
-                this.plugin.settings.maxHunger += 50;
-                this.plugin.settings.hunger += 50;
-                new Notice(`🎉 CONGRATULATIONS! 🎉\nYou have reached a new title: ${newTitle.name}!\nMax Satiety +50!`, 5000);
+                new Notice(`🎉 CONGRATULATIONS! 🎉\nYou have reached a new title: ${newTitle.name}!`, 5000);
                 await this.plugin.saveSettings();
             }
         } finally {

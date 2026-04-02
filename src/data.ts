@@ -16,6 +16,21 @@ export interface Title {
     icon: string;
     description: string;
 }
+export interface AISettings {
+    enabled: boolean;
+    name: string;
+    interval: number;
+    provider: 'openai' | 'gemini' | 'openrouter';
+    apiKey: string;
+    model: string;
+}
+
+export interface DailyXpLog {
+    [date: string]: {
+        [statId: string]: number;
+    };
+}
+
 export interface CustomShopItem {
     id: string;
     name: string;
@@ -38,6 +53,10 @@ export interface LifeGaugeSettings {
     coins: number;
     lastHungerUpdate: number;
     customShopItems: CustomShopItem[];
+    dailyXpLogs: DailyXpLog;
+    ai: AISettings;
+    lastAiResponse: string;
+    lastAiTriggerTime: number;
 }
 
 export const DEFAULT_STATS: Stat[] = [
@@ -125,14 +144,32 @@ export const DEFAULT_SETTINGS: LifeGaugeSettings = {
     maxHunger: 100,
     coins: 0,
     lastHungerUpdate: Date.now(),
-    customShopItems: []
+    customShopItems: [],
+    dailyXpLogs: {},
+    ai: {
+        enabled: false,
+        name: "Companion",
+        interval: 60,
+        provider: 'gemini',
+        apiKey: "",
+        model: "gemini-pro"
+    },
+    lastAiResponse: "Hello! I am your companion. Keep me full and be productive!",
+    lastAiTriggerTime: Date.now()
 };
+
+export function formatDate(date: Date): string {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
 
 export function getRequiredXp(level: number, baseXp: number, xpIncrement: number): number {
     return baseXp + (level - 1) * xpIncrement;
 }
 
-export function calculateLevel(currentXp: number, baseXp: number, xpIncrement: number): { level: number; remainingXp: number; requiredXp: number } {
+export function calculateLevel(currentXp: number, baseXp: number, xpIncrement: number): { level: number; remainingXp: number; requiredXp: number; progress: number } {
     let level = 1;
     let xpNeeded = baseXp;
     let tempXp = currentXp;
@@ -142,8 +179,8 @@ export function calculateLevel(currentXp: number, baseXp: number, xpIncrement: n
         level++;
         xpNeeded = baseXp + (level - 1) * xpIncrement;
     }
-
-    return { level, remainingXp: tempXp, requiredXp: xpNeeded };
+    const progress = (tempXp / xpNeeded) * 100;
+    return { level, remainingXp: tempXp, requiredXp: xpNeeded, progress };
 }
 
 export function getTotalXp(stats: Stat[]): number {

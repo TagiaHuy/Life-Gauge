@@ -50,16 +50,26 @@
     flex-shrink: 0;
     cursor: pointer;
     transition: transform 0.2s ease;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .lg-avatar-container:hover {
     transform: scale(1.05);
 }
 
+.lg-avatar-container:active {
+    transform: scale(0.95);
+}
+
 .lg-avatar {
     width: 100%;
     height: 100%;
     object-fit: cover;
+    transition: filter 0.3s ease;
+}
+
+.lg-avatar-container:hover .lg-avatar {
+    filter: drop-shadow(0 0 8px var(--interactive-accent));
 }
 
 .lg-info {
@@ -142,19 +152,49 @@
     font-size: 1.1em;
 }
 
-.lg-shop-btn {
-    background: var(--interactive-accent);
-    color: white;
-    border: none;
-    padding: 4px 12px;
-    border-radius: 6px;
-    font-size: 0.85em;
-    cursor: pointer;
-    transition: opacity 0.2s;
+
+
+/* Tab Navigation */
+.lg-tab-nav {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
 }
 
-.lg-shop-btn:hover {
-    opacity: 0.8;
+.lg-tab-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px;
+    background: var(--background-secondary-alt);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9em;
+    color: var(--text-muted);
+    transition: all 0.2s ease;
+}
+
+.lg-tab-btn:hover {
+    background: var(--background-modifier-hover);
+    border-color: var(--interactive-accent);
+}
+
+.lg-tab-btn.is-active {
+    background: var(--interactive-accent);
+    color: white;
+    border-color: var(--interactive-accent);
+    box-shadow: 0 2px 8px rgba(var(--interactive-accent-rgb), 0.4);
+}
+
+.lg-tab-icon {
+    font-size: 1.2em;
+}
+
+.lg-tab-name {
+    font-weight: 600;
 }
 
 /* Shop UI */
@@ -162,12 +202,6 @@
     animation: fadeIn 0.3s ease-out;
 }
 
-.lg-back-btn {
-    margin-bottom: 16px;
-    background: var(--background-modifier-border);
-    border: none;
-    cursor: pointer;
-}
 
 .lg-shop-grid {
     display: grid;
@@ -549,3 +583,135 @@
     border: 1px dashed var(--interactive-accent);
     background: var(--background-secondary-alt);
 }
+
+/* Statistics Section */
+.lg-stats-grid-daily {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+    gap: 12px;
+}
+
+.lg-daily-stat-card {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    transition: transform 0.2s;
+}
+
+.lg-daily-stat-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--interactive-accent);
+}
+
+.lg-daily-date {
+    font-size: 0.8em;
+    color: var(--text-muted);
+    font-weight: 500;
+}
+
+.lg-daily-xp {
+    font-size: 1.1em;
+    font-weight: bold;
+}
+
+.lg-daily-xp.xp-positive {
+    color: var(--text-success);
+}
+
+.lg-daily-xp.xp-negative {
+    color: var(--text-error);
+}
+
+.lg-daily-details {
+    margin-top: 4px;
+    font-size: 0.75em;
+    color: var(--text-faint);
+    border-top: 1px solid var(--background-modifier-border);
+    padding-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 100px;
+    overflow-y: auto;
+}
+
+.lg-daily-stat-item {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* Bar Chart */
+.lg-chart-container {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    padding: 24px 160px 16px 16px; /* Space for legend/labels if needed */
+    margin-bottom: 24px;
+    height: 250px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Extra padding for labels */
+.lg-chart-container {
+    padding-bottom: 40px;
+}
+
+.lg-chart-body {
+    flex-grow: 1;
+    display: flex;
+    align-items: flex-end;
+    gap: 8px;
+    border-bottom: 2px solid var(--background-modifier-border);
+    padding-bottom: 4px;
+    height: 100%;
+}
+
+.lg-bar-wrap {
+    flex: 1;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 8px;
+    position: relative;
+}
+
+.lg-bar {
+    width: 100%;
+    border-radius: 4px 4px 0 0;
+    transition: height 0.6s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    cursor: help;
+    min-height: 2px;
+}
+
+.lg-bar.is-positive {
+    background: linear-gradient(to top, var(--text-success), #80ffaa);
+    box-shadow: 0 0 10px rgba(77, 255, 136, 0.3);
+}
+
+.lg-bar.is-negative {
+    background: linear-gradient(to top, var(--text-error), #ff8080);
+    box-shadow: 0 0 10px rgba(255, 77, 77, 0.3);
+}
+
+.lg-bar:hover {
+    filter: brightness(1.2);
+    transform: scaleX(1.1);
+}
+
+.lg-bar-label {
+    font-size: 0.7em;
+    color: var(--text-faint);
+    position: absolute;
+    bottom: -35px;
+    transform: rotate(-45deg);
+    white-space: nowrap;
+}
+
+

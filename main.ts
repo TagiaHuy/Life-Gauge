@@ -1,7 +1,8 @@
 import { Plugin, PluginSettingTab, App, Setting, normalizePath, TFile, Notice, Modal } from 'obsidian';
-import { LifeGaugeSettings, DEFAULT_SETTINGS, Stat, DEFAULT_STATS, getCurrentTitle, calculateLevel } from './src/data';
+import { LifeGaugeSettings, DEFAULT_SETTINGS, Stat, DEFAULT_STATS, getCurrentTitle, calculateLevel, formatDate } from './src/data';
 import { LifeGaugeView, VIEW_TYPE_LIFE_GAUGE } from './src/view';
 import { parseTasks, getTaskKey, updateTaskInContent } from './src/parser';
+import { AIService } from './src/ai';
 
 export default class LifeGaugePlugin extends Plugin {
     settings!: LifeGaugeSettings;
@@ -21,15 +22,25 @@ export default class LifeGaugePlugin extends Plugin {
         );
 
         this.addRibbonIcon('gamepad', 'Open Life Gauge', () => {
-			this.activateView();
-		});
+            this.activateView();
+        });
 
         this.addSettingTab(new LifeGaugeSettingTab(this.app, this));
 
-        // Start hunger timer
+        // Start daily/periodic timer
         this.registerInterval(
-            window.setInterval(() => {
+            window.setInterval(async () => {
                 this.updateHunger();
+
+                // AI Interval Trigger
+                if (this.settings.ai.enabled) {
+                    const now = Date.now();
+                    const intervalMs = this.settings.ai.interval * 60 * 1000;
+                    if (now - this.settings.lastAiTriggerTime >= intervalMs) {
+                        await this.triggerAiAnalysis("It's been a while! How are things going?");
+                    }
+                }
+
                 this.saveSettings();
             }, 60 * 1000) // Every minute
         );
@@ -58,14 +69,14 @@ export default class LifeGaugePlugin extends Plugin {
                 const baseXP = Math.floor(Math.random() * 15) + 1;
                 const bonusXP = (requiredXp - 100) / 10;
                 const finalReward = (baseXP + bonusXP) * finalMultiplier;
-                
+
                 stat.currentXp += finalReward;
                 totalXpAwarded += finalReward;
                 reward.earnedAmount = Math.round(finalReward * 10) / 10; // For notice
                 if (stat.currentXp < 0) stat.currentXp = 0;
             }
         });
-        
+
         task.skills.forEach((skillName: string) => {
             const skill = this.settings.skills.find(s => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
             if (skill) {
@@ -73,7 +84,7 @@ export default class LifeGaugePlugin extends Plugin {
                 const baseXP = Math.floor(Math.random() * 15) + 1;
                 const bonusXP = (requiredXp - 100) / 10;
                 const finalReward = (baseXP + bonusXP) * finalMultiplier;
-                
+
                 skill.currentXp += finalReward;
                 if (skill.currentXp < 0) skill.currentXp = 0;
             }
@@ -82,8 +93,24 @@ export default class LifeGaugePlugin extends Plugin {
         // Award Coins
         const coins = this.getCoinReward();
         this.settings.coins += coins;
-        
+
+        // Log XP
+        task.rewards.forEach((r: any) => {
+            if (r.earnedAmount) this.logXp(r.statId, r.earnedAmount);
+        });
+
         return coins; // Return for notification
+    }
+
+    logXp(id: string, amount: number) {
+        const dateStr = formatDate(new Date());
+        if (!this.settings.dailyXpLogs[dateStr]) {
+            this.settings.dailyXpLogs[dateStr] = {};
+        }
+        if (!this.settings.dailyXpLogs[dateStr][id]) {
+            this.settings.dailyXpLogs[dateStr][id] = 0;
+        }
+        this.settings.dailyXpLogs[dateStr][id] += amount;
     }
 
     getHungerMultiplier(): number {
@@ -123,15 +150,17 @@ export default class LifeGaugePlugin extends Plugin {
         const threshold = this.settings.maxHunger * 0.3;
         if (this.settings.hunger < threshold) {
             const intervalsElapsed = elapsedMinutes / 30; // Base time unit: 30 minutes
-            
+
             // Adjusted Formula: xpLoss (per 30m) = penaltyPoint * (threshold - satiety) / 4
             const xpLoss = intervalsElapsed * this.settings.penaltyPoint * (threshold - this.settings.hunger) / 4;
 
             this.settings.stats.forEach(stat => {
                 stat.currentXp = Math.max(0, stat.currentXp - xpLoss);
+                this.logXp(stat.id, -xpLoss);
             });
             this.settings.skills.forEach(skill => {
                 skill.currentXp = Math.max(0, skill.currentXp - xpLoss);
+                this.logXp(skill.id, -xpLoss);
             });
         }
     }
@@ -139,13 +168,17 @@ export default class LifeGaugePlugin extends Plugin {
     applyUnreward(task: any) {
         task.rewards.forEach((reward: any) => {
             const stat = this.settings.stats.find(s => s.id === reward.statId);
-            if (stat) stat.currentXp = Math.max(0, stat.currentXp - reward.amount);
+            if (stat) {
+                stat.currentXp = Math.max(0, stat.currentXp - reward.amount);
+                this.logXp(stat.id, -reward.amount);
+            }
         });
         task.skills.forEach((skillName: string) => {
             const skill = this.settings.skills.find(s => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
             if (skill) {
                 const totalReward = task.rewards.reduce((sum: number, r: any) => sum + r.amount, 0) || 10;
                 skill.currentXp = Math.max(0, skill.currentXp - totalReward);
+                this.logXp(skill.id, -totalReward);
             }
         });
     }
@@ -156,7 +189,7 @@ export default class LifeGaugePlugin extends Plugin {
             const finalAmount = r.earnedAmount || 0;
             return `${finalAmount > 0 ? '+' : ''}${finalAmount} ${stat ? stat.name : r.statId}`;
         }).join(' ');
-        
+
         return `${rewardsList} +💰 ${coins} coin`.trim();
     }
 
@@ -166,7 +199,7 @@ export default class LifeGaugePlugin extends Plugin {
             const finalAmount = r.earnedAmount || 0;
             return `${finalAmount > 0 ? '+' : ''}${finalAmount} ${stat ? stat.name : r.statId}`;
         }).join(', ');
-        
+
         let rewardMsg = rewardsList ? ` (${rewardsList})` : '';
         if (task.earnedCoins) {
             rewardMsg += ` +💰 ${task.earnedCoins} coin`;
@@ -194,7 +227,7 @@ export default class LifeGaugePlugin extends Plugin {
 
             const oldTasks = this.lastKnownContent ? parseTasks(this.lastKnownContent, this.settings.stats) : [];
             const newTasks = parseTasks(content, this.settings.stats);
-            
+
             const now = new Date();
             let changed = false;
             let fileContentChanged = false;
@@ -203,7 +236,7 @@ export default class LifeGaugePlugin extends Plugin {
             // 1. Scan for newly completed tasks (including those present at startup)
             // They are [x] but don't have (done) yet.
             const newlyCompleted = newTasks.filter(t => t.completed && !t.isProcessed);
-            
+
             for (const task of newlyCompleted) {
                 const key = getTaskKey(task);
                 let rewardString = "";
@@ -222,14 +255,17 @@ export default class LifeGaugePlugin extends Plugin {
                     const newTotalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
                     const newTitle = getCurrentTitle(newTotalXp, this.settings.titles);
                     if (newTitle.name !== oldTitle.name) {
-                        this.settings.maxHunger += 50;
-                        this.settings.hunger += 50;
-                        new Notice(`🎉 CONGRATULATIONS! 🎉\nYou have reached a new title: ${newTitle.name}!\nMax Satiety +50!`, 5000);
+                        new Notice(`🎉 CONGRATULATIONS! 🎉\nYou have reached a new title: ${newTitle.name}!`, 5000);
                     }
 
                     changed = true;
+
+                    // AI Trigger on completion
+                    if (this.settings.ai.enabled) {
+                        await this.triggerAiAnalysis(`I just completed a task: ${task.text}. I earned ${rewardString}.`);
+                    }
                 }
-                
+
                 // ALWAYS ensure (done) is added to the file
                 currentContent = updateTaskInContent(currentContent, task.originalLine, true, true, rewardString);
                 fileContentChanged = true;
@@ -285,7 +321,7 @@ export default class LifeGaugePlugin extends Plugin {
 
     getPenaltyInfo(task: any, now: Date): { multiplier: number, isLate: boolean, minutesLate: number } {
         if (!task.date && !task.time) return { multiplier: 1, isLate: false, minutesLate: 0 };
-        
+
         let deadline: Date;
         if (task.date && task.time) {
             deadline = new Date(`${task.date}T${task.time}`);
@@ -302,13 +338,73 @@ export default class LifeGaugePlugin extends Plugin {
         // New Formula: Points - (Minutes Late * Points / 100) * penaltyPoint
         // multiplier = 1 - (minutesLate * penaltyPoint / 100)
         const multiplier = 1 - (minutesLate * this.settings.penaltyPoint / 100);
-        
+
         return { multiplier, isLate: true, minutesLate };
+    }
+
+    private AI_BEHAVIORS = [
+        "Review: Thorough analysis of my productivity.",
+        "Compare: Compare me to yesterday or goals.",
+        "Complain: Complain about me neglecting my duties or letting the food run out.",
+        "Sadness: Feeling disappointed if I underperform.",
+        "Encouragement: Inspire and motivate strongly.",
+        "Crazy: Humorously teasing about my habits.",
+        "Anxious: Shows anxiety if I have a lot of overdue tasks.",
+        "Excited: Shout with excitement when I achieve new achievements.",
+        "Philosophy: Deep reflections on discipline and life.",
+        "Curious: Ask about what I'm working on."
+    ];
+
+    async triggerAiAnalysis(triggerPrompt: string) {
+        if (!this.settings.ai.enabled || !this.settings.ai.apiKey) return;
+
+        const totalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
+        const title = getCurrentTitle(totalXp, this.settings.titles);
+
+        const behaviorIdx = Math.floor(Math.random() * this.AI_BEHAVIORS.length);
+        const currentBehavior = this.AI_BEHAVIORS[behaviorIdx];
+
+        // Format stats for context
+        const statsInfo = this.settings.stats.map(s => {
+            const { level, progress } = calculateLevel(s.currentXp, s.baseXp, s.xpIncrement);
+            return `- ${s.name} (${s.id}): Level ${level} (${Math.floor(progress)}%)`;
+        }).join('\n');
+
+        const context = `
+You are ${this.settings.ai.name}, a helpful and cheeky companion for the user in a life-gamification plugin.
+Current Status:
+- Satiety (Hunger): ${Math.floor(this.settings.hunger)}/${this.settings.maxHunger}
+- Current Rank: ${title.name}
+- Total Coins: ${this.settings.coins}
+- Trigger Context: ${triggerPrompt}
+- Primary Behavioral Trait for this response: ${currentBehavior}
+
+Current Player Stats:
+${statsInfo}
+
+Personality Guidelines based on Stats:
+1. If "Strength" (STR) is high (Level 5+), be confident, bold, and energetic.
+2. If "Knowledge/Intelligence" (INT) is low (Level 1-2), be slightly confused, silly, or include a "goofy action" or a "dumb mistake" in your speech.
+3. If "Vitality" (VIT) is high, be overly healthy and enthusiastic about physical well-being.
+4. If "Dexterity" (DEX) is low, mention being clumsy or dropping something.
+5. If Satiety is low, act hungry or weak regardless of other stats.
+
+Rules:
+1. Speak as ${this.settings.ai.name}. Be brief (max 2 sentences).
+2. Based on the rules above, react to the user current status and the trigger context.
+3. Blend the "Primary Behavioral Trait" with the "Personality Guidelines" above.
+4. Output ONLY the speech of the character.
+`;
+
+        const response = await AIService.generateResponse(this.settings, context);
+        this.settings.lastAiResponse = response;
+        this.settings.lastAiTriggerTime = Date.now();
+        this.saveSettings();
     }
 
     async loadSettings() {
         this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
-        
+
         // Initialize lastKnownContent
         const file = this.app.vault.getAbstractFileByPath(this.settings.taskFilePath);
         if (file instanceof TFile) {
@@ -322,20 +418,20 @@ export default class LifeGaugePlugin extends Plugin {
     }
 
     async activateView() {
-		const { workspace } = this.app;
+        const { workspace } = this.app;
 
-		let leaf = workspace.getLeavesOfType(VIEW_TYPE_LIFE_GAUGE)[0];
+        let leaf = workspace.getLeavesOfType(VIEW_TYPE_LIFE_GAUGE)[0];
 
-		if (!leaf) {
-			leaf = workspace.getRightLeaf(false)!;
-			await leaf.setViewState({
-				type: VIEW_TYPE_LIFE_GAUGE,
-				active: true,
-			});
-		}
+        if (!leaf) {
+            leaf = workspace.getRightLeaf(false)!;
+            await leaf.setViewState({
+                type: VIEW_TYPE_LIFE_GAUGE,
+                active: true,
+            });
+        }
 
-		workspace.revealLeaf(leaf);
-	}
+        workspace.revealLeaf(leaf);
+    }
 
     refreshViews() {
         this.app.workspace.getLeavesOfType(VIEW_TYPE_LIFE_GAUGE).forEach((leaf) => {
@@ -437,6 +533,78 @@ class LifeGaugeSettingTab extends PluginSettingTab {
 
         containerEl.createEl('h2', { text: 'Life Gauge Settings' });
 
+        // --- AI Settings Section ---
+        containerEl.createEl('h3', { text: '🤖 AI Companion (Mascot)' });
+
+        new Setting(containerEl)
+            .setName('Enable AI Companion')
+            .setDesc('Turn on your AI companion. This will replace the Title system in the header.')
+            .addToggle(toggle => toggle
+                .setValue(this.plugin.settings.ai.enabled)
+                .onChange(async (value) => {
+                    this.plugin.settings.ai.enabled = value;
+                    await this.plugin.saveSettings();
+                    this.display(); // Refresh to show/hide other AI settings
+                }));
+
+        if (this.plugin.settings.ai.enabled) {
+            new Setting(containerEl)
+                .setName('Companion Name')
+                .setDesc('How should your companion be called? (e.g. Paimon)')
+                .addText(text => text
+                    .setValue(this.plugin.settings.ai.name)
+                    .onChange(async (value) => {
+                        this.plugin.settings.ai.name = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('AI Provider')
+                .addDropdown(dropdown => dropdown
+                    .addOption('openai', 'OpenAI')
+                    .addOption('gemini', 'Google Gemini')
+                    .addOption('openrouter', 'OpenRouter')
+                    .setValue(this.plugin.settings.ai.provider)
+                    .onChange(async (value: any) => {
+                        this.plugin.settings.ai.provider = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('API Key')
+                .addText(text => text
+                    .setPlaceholder('Enter your API key')
+                    .setValue(this.plugin.settings.ai.apiKey)
+                    .onChange(async (value) => {
+                        this.plugin.settings.ai.apiKey = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('Model')
+                .setDesc('e.g. gpt-3.5-turbo, gemini-pro, etc.')
+                .addText(text => text
+                    .setValue(this.plugin.settings.ai.model)
+                    .onChange(async (value) => {
+                        this.plugin.settings.ai.model = value;
+                        await this.plugin.saveSettings();
+                    }));
+
+            new Setting(containerEl)
+                .setName('Trigger Interval (Minutes)')
+                .setDesc('How often should the AI speak to you automatically?')
+                .addSlider(slider => slider
+                    .setLimits(5, 720, 5)
+                    .setValue(this.plugin.settings.ai.interval)
+                    .setDynamicTooltip()
+                    .onChange(async (value) => {
+                        this.plugin.settings.ai.interval = value;
+                        await this.plugin.saveSettings();
+                    }));
+        }
+
+        containerEl.createEl('h3', { text: '📁 Task Configuration' });
+
         new Setting(containerEl)
             .setName('Avatar Path')
             .setDesc('Path to your avatar image in the vault.')
@@ -488,10 +656,10 @@ class LifeGaugeSettingTab extends PluginSettingTab {
             statHeader.style.display = 'flex';
             statHeader.style.justifyContent = 'space-between';
             statHeader.style.alignItems = 'center';
-            
+
             const titleEl = statHeader.createEl('h4', { text: stat.name });
             titleEl.style.margin = '0';
-            
+
             const deleteBtn = statHeader.createEl('button', { text: 'Delete', cls: 'mod-warning' });
             deleteBtn.addEventListener('click', async () => {
                 this.plugin.settings.stats.splice(index, 1);
@@ -526,7 +694,7 @@ class LifeGaugeSettingTab extends PluginSettingTab {
                         this.plugin.settings.stats[index].color = value;
                         await this.plugin.saveSettings();
                     }));
-            
+
             statsDetails.createEl('hr');
         });
 
@@ -559,10 +727,10 @@ class LifeGaugeSettingTab extends PluginSettingTab {
             skillHeader.style.display = 'flex';
             skillHeader.style.justifyContent = 'space-between';
             skillHeader.style.alignItems = 'center';
-            
+
             const titleEl = skillHeader.createEl('h4', { text: skill.name });
             titleEl.style.margin = '0';
-            
+
             const deleteBtn = skillHeader.createEl('button', { text: 'Delete', cls: 'mod-warning' });
             deleteBtn.addEventListener('click', async () => {
                 this.plugin.settings.skills.splice(index, 1);
@@ -596,7 +764,7 @@ class LifeGaugeSettingTab extends PluginSettingTab {
                         this.plugin.settings.skills[index].color = value;
                         await this.plugin.saveSettings();
                     }));
-            
+
             skillsDetails.createEl('hr');
         });
 
@@ -629,10 +797,10 @@ class LifeGaugeSettingTab extends PluginSettingTab {
             titleHeader.style.display = 'flex';
             titleHeader.style.justifyContent = 'space-between';
             titleHeader.style.alignItems = 'center';
-            
+
             const titleLabel = titleHeader.createEl('h4', { text: title.name });
             titleLabel.style.margin = '0';
-            
+
             const deleteBtn = titleHeader.createEl('button', { text: 'Delete', cls: 'mod-warning' });
             deleteBtn.addEventListener('click', async () => {
                 this.plugin.settings.titles.splice(index, 1);
@@ -679,7 +847,7 @@ class LifeGaugeSettingTab extends PluginSettingTab {
                         this.plugin.settings.titles[index].description = value;
                         await this.plugin.saveSettings();
                     }));
-            
+
             titlesDetails.createEl('hr');
         });
 
@@ -707,10 +875,10 @@ class LifeGaugeSettingTab extends PluginSettingTab {
             itemHeader.style.display = 'flex';
             itemHeader.style.justifyContent = 'space-between';
             itemHeader.style.alignItems = 'center';
-            
+
             const itemTitle = itemHeader.createEl('h4', { text: item.name });
             itemTitle.style.margin = '0';
-            
+
             const deleteBtn = itemHeader.createEl('button', { text: 'Delete', cls: 'mod-warning' });
             deleteBtn.addEventListener('click', async () => {
                 this.plugin.settings.customShopItems.splice(index, 1);
@@ -757,7 +925,7 @@ class LifeGaugeSettingTab extends PluginSettingTab {
                             await this.plugin.saveSettings();
                         }
                     }));
-            
+
             customShopItemsDetails.createEl('hr');
         });
 

@@ -4,55 +4,50 @@
 
 ## 🌟 Key Features
 
-- **RPG-like Stats**: Track core attributes like Knowledge, Stamina, and more.
+- **AI Companion (Mascot)**: [NEW] An interactive companion (like Paimon) that tracks your status and reacts to your progress.
+- **Dynamic Personality**: The AI's behavior shifts based on your actual stats (e.g., confident if STR is high, silly if INT is low).
+- **RPG-like Stats**: Track core attributes like Strength, Knowledge, Vitality, and more.
 - **Custom Skills**: Award XP to specific skills (e.g., `#English`, `#Java`) using hashtags in your tasks.
 - **Dynamic Titles**: Rise from a "Kẻ Lạc Lõng" to a legendary hero as you accumulate total XP.
 - **Smart Task Parsing**: Automatically detects rewards, dates, times, and skills from your standard Markdown checklists.
-- **Punishing Penalty System**: Earn less XP for overdue tasks. If you're late enough, points are even deducted from your stats!
-- **Beautiful Dashboard**: A dedicated view to monitor your progress, current rank, and upcoming quests.
-- **Highly Configurable**: Customize every stat, skill, and title directly in the settings.
+- **Punishing Penalty System**: Earn less XP for overdue tasks. If you're late enough, points are even deducted!
+- **Daily XP Tracking**: Monitor your progress with beautiful bar charts in the new Stats tab.
+- **Shop System**: Spend your earned coins on custom rewards or status-restoring items.
+- **Highly Configurable**: Customize every mascot name, stat, skill, and title directly in the settings.
+
+## 🤖 AI Mascot Integration
+
+Enable the **AI Companion** in settings to replace the traditional title system with a living mascot.
+
+- **Interaction**: Click/Tap the mascot's avatar anytime to get a status check.
+- **Triggers**: The mascot will automatically comment after you complete tasks or based on a configurable time interval.
+- **Stat Awareness**: The mascot knows your current STR, INT, VIT, and DEX levels and will change its tone and personality accordingly.
+- **Multi-Provider**: Choose between Google Gemini (Pro), OpenAI (GPT), or OpenRouter.
 
 ## 📝 Syntax Guide
 
-To make your tasks count toward your progress, follow this syntax in your designated task file:
+To make your tasks count toward your progress, follow this syntax:
 
-### Basic Quest
-`- [ ] Read a book (+15 Knowledge) @{2026-03-21} @@{22:00}`
+`- [ ] Read a book (+15 Knowledge) @{2026-03-21} @@{22:00} #reading`
 
 - **Rewards**: `(+XP StatName)` (e.g., `+10 stamina`)
 - **Deadline Date**: `@{YYYY-MM-DD}` (Mandatory)
-- **Deadline Time**: `@@{HH:MM}` (Optional, defaults to end of day)
-- **Skills**: `#skill-name` (e.g., `#react`, `#cooking`)
-
-### Example Multi-XP Task
-`- [ ] Gym Session (+20 Stamina, +5 Willpower) @{2026-03-21} @@{18:00} #fitness`
+- **Deadline Time**: `@@{HH:MM}` (Optional)
+- **Skills**: `#skill-name` (e.g., `#react`, `#fitness`)
 
 ## 💀 Penalty Formula
 
-Don't let your tasks expire! Life Gauge enforces a strict penalty for late completion:
-
 `Final XP = Original Reward - (Minutes Late * Original Reward / 100) * PenaltyPoint`
 
-- **Penalty Point**: A multiplier set in settings (default is 1).
-- **Negative XP**: If you are extremely late, you will **lose points** upon checking the task.
-- **No Deadline**: Tasks without a date or time will be ignored by the dashboard.
-
-## ⚙️ Settings
-
-The plugin settings tab is organized into collapsible sections for easy management:
-
-1.  **General**: Configure your avatar path and task file location.
-2.  **Penalty Configuration**: Adjust the `Penalty Point` multiplier to change the game's difficulty.
-3.  **Stats Configuration**: Add, edit, or delete the attributes you want to track.
-4.  **Skills Configuration**: Manage your specific life skills and their XP growth.
-5.  **Titles Configuration**: Define your own ranking system with custom XP thresholds and descriptions.
+- **Satiety (Hunger)**: Your mascot gets hungry over time! Low satiety leads to XP penalties and grumpy mascot reactions.
 
 ## 🚀 Getting Started
 
-1.  Create a Markdown file for your tasks (e.g., `Daily/Quests.md`).
-2.  Set the path to this file in the **Life Gauge Settings**.
-3.  Open the **Life Gauge Dashboard** from the ribbon icon (gamepad 🎮).
-4.  Start writing quests and watch your character grow!
+1.  Create a Markdown file for your tasks.
+2.  Set the path to this file in **Life Gauge Settings**.
+3.  (Optional) Enable **AI Companion** and add your API key.
+4.  Open the **Life Gauge Dashboard** from the ribbon icon (gamepad 🎮).
+5.  Start writing quests and watch your character grow!
 
 ---
 *Transform your life, one quest at a time.* 🛡️⚔️🏆

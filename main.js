@@ -33,7 +33,7 @@ __export(main_exports, {
   default: () => LifeGaugePlugin
 });
 module.exports = __toCommonJS(main_exports);
-var import_obsidian2 = require("obsidian");
+var import_obsidian3 = require("obsidian");
 
 // src/data.ts
 var DEFAULT_STATS = [
@@ -119,8 +119,25 @@ var DEFAULT_SETTINGS = {
   maxHunger: 100,
   coins: 0,
   lastHungerUpdate: Date.now(),
-  customShopItems: []
+  customShopItems: [],
+  dailyXpLogs: {},
+  ai: {
+    enabled: false,
+    name: "Companion",
+    interval: 60,
+    provider: "gemini",
+    apiKey: "",
+    model: "gemini-pro"
+  },
+  lastAiResponse: "Hello! I am your companion. Keep me full and be productive!",
+  lastAiTriggerTime: Date.now()
 };
+function formatDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
 function calculateLevel(currentXp, baseXp, xpIncrement) {
   let level = 1;
   let xpNeeded = baseXp;
@@ -130,7 +147,8 @@ function calculateLevel(currentXp, baseXp, xpIncrement) {
     level++;
     xpNeeded = baseXp + (level - 1) * xpIncrement;
   }
-  return { level, remainingXp: tempXp, requiredXp: xpNeeded };
+  const progress = tempXp / xpNeeded * 100;
+  return { level, remainingXp: tempXp, requiredXp: xpNeeded, progress };
 }
 function getTotalXp(stats) {
   return stats.reduce((acc, stat) => acc + stat.currentXp, 0);
@@ -276,7 +294,7 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     __publicField(this, "plugin");
     __publicField(this, "tasks", []);
     __publicField(this, "isUpdating", false);
-    __publicField(this, "showShop", false);
+    __publicField(this, "activeTab", "main");
     __publicField(this, "purchasedItemIds", /* @__PURE__ */ new Set());
     this.plugin = plugin;
   }
@@ -306,15 +324,17 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       contentEl.empty();
       contentEl.addClass("life-gauge-dashboard");
       this.renderHeader(contentEl, title, nextTitle, totalXp);
-      if (this.showShop) {
+      if (this.activeTab === "shop") {
         this.renderShop(contentEl);
-        return;
+      } else if (this.activeTab === "stats") {
+        this.renderStatsTab(contentEl);
+      } else {
+        this.renderStats(contentEl);
+        if (this.plugin.settings.skills.length > 0) {
+          this.renderSkills(contentEl);
+        }
+        this.renderQuests(contentEl, visibleTasks);
       }
-      this.renderStats(contentEl);
-      if (this.plugin.settings.skills.length > 0) {
-        this.renderSkills(contentEl);
-      }
-      this.renderQuests(contentEl, visibleTasks);
     } catch (e) {
       console.error("Life Gauge: Update failed", e);
     } finally {
@@ -334,25 +354,58 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     const header = parent.createEl("div", { cls: "lg-header" });
     const topBar = header.createEl("div", { cls: "lg-header-top-bar" });
     this.renderSatiety(topBar);
-    const coinsShopGroup = topBar.createEl("div", { cls: "lg-coins-shop-group" });
-    const coinContainer = coinsShopGroup.createEl("div", { cls: "lg-coin-container" });
+    const coinsSettingsGroup = topBar.createEl("div", { cls: "lg-coins-shop-group" });
+    const coinContainer = coinsSettingsGroup.createEl("div", { cls: "lg-coin-container" });
     coinContainer.createEl("span", { text: `\u{1F4B0} ${Math.floor(this.plugin.settings.coins)}`, cls: "lg-coin-text" });
-    const shopBtn = coinsShopGroup.createEl("button", { text: "\u{1F3EA} Shop", cls: "lg-shop-btn" });
-    shopBtn.addEventListener("click", () => this.toggleShop());
-    const settingsIcon = topBar.createEl("div", { cls: "lg-settings-icon", text: "\u2699\uFE0F" });
+    const settingsIcon = coinsSettingsGroup.createEl("div", { cls: "lg-settings-icon", text: "\u2699\uFE0F" });
     settingsIcon.addEventListener("click", () => {
       this.app.setting.open();
       this.app.setting.openTabById(this.plugin.manifest.id);
+    });
+    const tabNav = header.createEl("div", { cls: "lg-tab-nav" });
+    const tabs = [
+      { id: "main", name: "Dashboard", icon: "\u{1F3E0}" },
+      { id: "shop", name: "Shop", icon: "\u{1F3EA}" },
+      { id: "stats", name: "Stats", icon: "\u{1F4CA}" }
+    ];
+    tabs.forEach((t) => {
+      const tabBtn = tabNav.createEl("button", { cls: `lg-tab-btn ${this.activeTab === t.id ? "is-active" : ""}` });
+      tabBtn.createEl("span", { text: t.icon, cls: "lg-tab-icon" });
+      tabBtn.createEl("span", { text: t.name, cls: "lg-tab-name" });
+      tabBtn.addEventListener("click", () => {
+        this.activeTab = t.id;
+        this.update();
+      });
     });
     const mainInfo = header.createEl("div", { cls: "lg-header-main" });
     const avatarContainer = mainInfo.createEl("div", { cls: "lg-avatar-container" });
     const avatar = avatarContainer.createEl("img", {
       cls: "lg-avatar",
-      attr: { src: this.app.vault.adapter.getResourcePath(this.plugin.settings.avatarPath) }
+      attr: {
+        src: this.app.vault.adapter.getResourcePath(this.plugin.settings.avatarPath),
+        title: this.plugin.settings.ai.enabled ? `Click to talk to ${this.plugin.settings.ai.name}` : ""
+      }
     });
+    if (this.plugin.settings.ai.enabled) {
+      avatar.addEventListener("click", async () => {
+        new import_obsidian.Notice(`${this.plugin.settings.ai.name} is thinking...`);
+        await this.plugin.triggerAiAnalysis("I'm checking in on you!");
+        new import_obsidian.Notice(`${this.plugin.settings.ai.name} has spoken!`);
+        this.update();
+      });
+    }
     const info = mainInfo.createEl("div", { cls: "lg-info" });
-    info.createEl("div", { cls: "lg-nickname", text: `${title.icon} ${title.name.toUpperCase()} ${title.icon}` });
-    info.createEl("div", { cls: "lg-description", text: title.description });
+    let displayName = `${title.icon} ${title.name.toUpperCase()} ${title.icon}`;
+    let displayDesc = title.description;
+    if (this.plugin.settings.ai.enabled) {
+      displayName = this.plugin.settings.ai.name.toUpperCase();
+      displayDesc = this.plugin.settings.lastAiResponse;
+    }
+    info.createEl("div", { cls: "lg-nickname", text: displayName });
+    info.createEl("div", { cls: "lg-description", text: displayDesc });
+    if (this.plugin.settings.ai.enabled) {
+      return;
+    }
     if (nextTitle) {
       const neededForNext = nextTitle.threshold - totalXp;
       info.createEl("div", { cls: "lg-next-rank", text: `\u{1F51C} ${neededForNext} XP to become ${nextTitle.name}` });
@@ -378,18 +431,9 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     }
     container.createEl("div", { text: `${Math.floor(hunger)} / ${maxHunger}`, cls: "lg-satiety-value" });
   }
-  toggleShop() {
-    this.showShop = !this.showShop;
-    if (!this.showShop) {
-      this.purchasedItemIds.clear();
-    }
-    this.update();
-  }
   renderShop(parent) {
     const shopContainer = parent.createEl("div", { cls: "lg-shop-container" });
     shopContainer.createEl("h3", { text: "\u{1F3EA} Food Shop", cls: "lg-section-title" });
-    const backBtn = shopContainer.createEl("button", { text: "\u2B05\uFE0F Back to Dashboard", cls: "lg-back-btn" });
-    backBtn.addEventListener("click", () => this.toggleShop());
     const shopGrid = shopContainer.createEl("div", { cls: "lg-shop-grid" });
     const items = [
       { icon: "\u{1F352}", name: "Cherry", boost: 5, cost: 10 },
@@ -541,6 +585,75 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       }
     });
   }
+  renderStatsTab(parent) {
+    const statsTab = parent.createEl("div", { cls: "lg-stats-tab" });
+    statsTab.createEl("h3", { text: "\u{1F4CA} XP Statistics", cls: "lg-section-title" });
+    const chartContainer = statsTab.createEl("div", { cls: "lg-chart-container" });
+    const daysToShow = 14;
+    const data = [];
+    let maxDailyXp = 50;
+    for (let i = daysToShow - 1; i >= 0; i--) {
+      const date = /* @__PURE__ */ new Date();
+      date.setDate(date.getDate() - i);
+      const dateStr = formatDate(date);
+      const dayLogs = this.plugin.settings.dailyXpLogs[dateStr] || {};
+      let dailyTotal = 0;
+      Object.values(dayLogs).forEach((val) => dailyTotal += val);
+      data.push({
+        label: i === 0 ? "Today" : date.getDate(),
+        totalXp: dailyTotal,
+        dateStr
+      });
+      maxDailyXp = Math.max(maxDailyXp, Math.abs(dailyTotal));
+    }
+    const chartBody = chartContainer.createEl("div", { cls: "lg-chart-body" });
+    data.forEach((d) => {
+      const barWrap = chartBody.createEl("div", { cls: "lg-bar-wrap" });
+      const percent = Math.abs(d.totalXp) / maxDailyXp * 100;
+      const bar = barWrap.createEl("div", {
+        cls: `lg-bar ${d.totalXp >= 0 ? "is-positive" : "is-negative"}`,
+        attr: { title: `${d.dateStr}: ${Math.round(d.totalXp * 10) / 10} XP` }
+      });
+      bar.style.height = `${Math.max(2, percent)}%`;
+      barWrap.createEl("div", { text: d.label.toString(), cls: "lg-bar-label" });
+    });
+    statsTab.createEl("h3", { text: "\u{1F4CB} Recent History", cls: "lg-section-title" });
+    this.renderStatistics(statsTab);
+  }
+  renderStatistics(parent) {
+    const statsSection = parent.createEl("div", { cls: "lg-statistics-section" });
+    statsSection.createEl("h3", { text: "\u{1F4CA} Daily Progress (Last 7 Days)", cls: "lg-section-title" });
+    const statsGrid = statsSection.createEl("div", { cls: "lg-stats-grid-daily" });
+    for (let i = 0; i < 7; i++) {
+      const date = /* @__PURE__ */ new Date();
+      date.setDate(date.getDate() - i);
+      const dateStr = formatDate(date);
+      const dayLogs = this.plugin.settings.dailyXpLogs[dateStr] || {};
+      let dailyTotal = 0;
+      Object.values(dayLogs).forEach((val) => dailyTotal += val);
+      const dayCard = statsGrid.createEl("div", { cls: "lg-daily-stat-card" });
+      const dayLabel = i === 0 ? "Today" : i === 1 ? "Yesterday" : dateStr;
+      dayCard.createEl("div", { text: dayLabel, cls: "lg-daily-date" });
+      const totalXp = Math.round(dailyTotal * 10) / 10;
+      const xpText = dayCard.createEl("div", { text: `${totalXp > 0 ? "+" : ""}${totalXp} XP`, cls: "lg-daily-xp" });
+      if (totalXp > 0) {
+        xpText.addClass("xp-positive");
+      } else if (totalXp < 0) {
+        xpText.addClass("xp-negative");
+      }
+      if (Object.keys(dayLogs).length > 0) {
+        const details = dayCard.createEl("div", { cls: "lg-daily-details" });
+        Object.entries(dayLogs).forEach(([id, amount]) => {
+          if (Math.abs(amount) < 0.1)
+            return;
+          const stat = this.plugin.settings.stats.find((s) => s.id === id) || this.plugin.settings.skills.find((s) => s.id === id || s.name === id);
+          const name = stat ? stat.name : id;
+          const roundedAmount = Math.round(amount * 10) / 10;
+          details.createEl("div", { text: `${name}: ${roundedAmount > 0 ? "+" : ""}${roundedAmount}`, cls: "lg-daily-stat-item" });
+        });
+      }
+    }
+  }
   async handleTaskToggle(task, completed) {
     if (task.isProcessed)
       return;
@@ -590,11 +703,8 @@ ${statusMsg} due to delay of ${penaltyInfo.minutesLate} minutes.`, 5e3);
       const newTotalXp = getTotalXp(this.plugin.settings.stats);
       const newTitle = getCurrentTitle(newTotalXp, this.plugin.settings.titles);
       if (completed && newTitle.name !== currentTitle.name) {
-        this.plugin.settings.maxHunger += 50;
-        this.plugin.settings.hunger += 50;
         new import_obsidian.Notice(`\u{1F389} CONGRATULATIONS! \u{1F389}
-You have reached a new title: ${newTitle.name}!
-Max Satiety +50!`, 5e3);
+You have reached a new title: ${newTitle.name}!`, 5e3);
         await this.plugin.saveSettings();
       }
     } finally {
@@ -603,8 +713,74 @@ Max Satiety +50!`, 5e3);
   }
 };
 
+// src/ai.ts
+var import_obsidian2 = require("obsidian");
+var AIService = class {
+  static async generateResponse(settings, context) {
+    const { provider, apiKey, model } = settings.ai;
+    if (!apiKey)
+      return "API Key is missing. Please check settings.";
+    try {
+      if (provider === "openai") {
+        return await this.callOpenAI(apiKey, model, context);
+      } else if (provider === "gemini") {
+        return await this.callGemini(apiKey, model, context);
+      } else if (provider === "openrouter") {
+        return await this.callOpenRouter(apiKey, model, context);
+      }
+      return "Unsupported provider.";
+    } catch (e) {
+      console.error("Life Gauge AI Error:", e);
+      return `Error: ${e.message || "Failed to connect to AI"}`;
+    }
+  }
+  static async callOpenAI(apiKey, model, context) {
+    const response = await (0, import_obsidian2.requestUrl)({
+      url: "https://api.openai.com/v1/chat/completions",
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        model: model || "gpt-3.5-turbo",
+        messages: [{ role: "user", content: context }]
+      })
+    });
+    return response.json.choices[0].message.content;
+  }
+  static async callGemini(apiKey, model, context) {
+    const response = await (0, import_obsidian2.requestUrl)({
+      url: `https://generativelanguage.googleapis.com/v1beta/models/${model || "gemini-pro"}:generateContent?key=${apiKey}`,
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: context }] }]
+      })
+    });
+    return response.json.candidates[0].content.parts[0].text;
+  }
+  static async callOpenRouter(apiKey, model, context) {
+    const response = await (0, import_obsidian2.requestUrl)({
+      url: "https://openrouter.ai/api/v1/chat/completions",
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+        "HTTP-Referer": "https://obsidian.md",
+        "X-Title": "Life-Gauge"
+      },
+      body: JSON.stringify({
+        model: model || "openai/gpt-3.5-turbo",
+        messages: [{ role: "user", content: context }]
+      })
+    });
+    return response.json.choices[0].message.content;
+  }
+};
+
 // main.ts
-var LifeGaugePlugin = class extends import_obsidian2.Plugin {
+var LifeGaugePlugin = class extends import_obsidian3.Plugin {
   constructor() {
     super(...arguments);
     __publicField(this, "settings");
@@ -612,6 +788,18 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
     __publicField(this, "isSyncing", false);
     __publicField(this, "pendingSync", false);
     __publicField(this, "lastKnownContent", "");
+    __publicField(this, "AI_BEHAVIORS", [
+      "Review: Thorough analysis of my productivity.",
+      "Compare: Compare me to yesterday or goals.",
+      "Complain: Complain about me neglecting my duties or letting the food run out.",
+      "Sadness: Feeling disappointed if I underperform.",
+      "Encouragement: Inspire and motivate strongly.",
+      "Crazy: Humorously teasing about my habits.",
+      "Anxious: Shows anxiety if I have a lot of overdue tasks.",
+      "Excited: Shout with excitement when I achieve new achievements.",
+      "Philosophy: Deep reflections on discipline and life.",
+      "Curious: Ask about what I'm working on."
+    ]);
   }
   async onload() {
     await this.loadSettings();
@@ -626,8 +814,15 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
     });
     this.addSettingTab(new LifeGaugeSettingTab(this.app, this));
     this.registerInterval(
-      window.setInterval(() => {
+      window.setInterval(async () => {
         this.updateHunger();
+        if (this.settings.ai.enabled) {
+          const now = Date.now();
+          const intervalMs = this.settings.ai.interval * 60 * 1e3;
+          if (now - this.settings.lastAiTriggerTime >= intervalMs) {
+            await this.triggerAiAnalysis("It's been a while! How are things going?");
+          }
+        }
         this.saveSettings();
       }, 60 * 1e3)
       // Every minute
@@ -636,7 +831,7 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
       this.app.vault.on("modify", async (file) => {
         if (this.isInternalChange)
           return;
-        if (file instanceof import_obsidian2.TFile && file.path === this.settings.taskFilePath) {
+        if (file instanceof import_obsidian3.TFile && file.path === this.settings.taskFilePath) {
           await this.syncTasksFromFile(file);
         }
       })
@@ -674,7 +869,21 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
     });
     const coins = this.getCoinReward();
     this.settings.coins += coins;
+    task.rewards.forEach((r) => {
+      if (r.earnedAmount)
+        this.logXp(r.statId, r.earnedAmount);
+    });
     return coins;
+  }
+  logXp(id, amount) {
+    const dateStr = formatDate(/* @__PURE__ */ new Date());
+    if (!this.settings.dailyXpLogs[dateStr]) {
+      this.settings.dailyXpLogs[dateStr] = {};
+    }
+    if (!this.settings.dailyXpLogs[dateStr][id]) {
+      this.settings.dailyXpLogs[dateStr][id] = 0;
+    }
+    this.settings.dailyXpLogs[dateStr][id] += amount;
   }
   getHungerMultiplier() {
     if (this.settings.hunger >= this.settings.maxHunger)
@@ -713,23 +922,28 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
       const xpLoss = intervalsElapsed * this.settings.penaltyPoint * (threshold - this.settings.hunger) / 4;
       this.settings.stats.forEach((stat) => {
         stat.currentXp = Math.max(0, stat.currentXp - xpLoss);
+        this.logXp(stat.id, -xpLoss);
       });
       this.settings.skills.forEach((skill) => {
         skill.currentXp = Math.max(0, skill.currentXp - xpLoss);
+        this.logXp(skill.id, -xpLoss);
       });
     }
   }
   applyUnreward(task) {
     task.rewards.forEach((reward) => {
       const stat = this.settings.stats.find((s) => s.id === reward.statId);
-      if (stat)
+      if (stat) {
         stat.currentXp = Math.max(0, stat.currentXp - reward.amount);
+        this.logXp(stat.id, -reward.amount);
+      }
     });
     task.skills.forEach((skillName) => {
       const skill = this.settings.skills.find((s) => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
       if (skill) {
         const totalReward = task.rewards.reduce((sum, r) => sum + r.amount, 0) || 10;
         skill.currentXp = Math.max(0, skill.currentXp - totalReward);
+        this.logXp(skill.id, -totalReward);
       }
     });
   }
@@ -754,10 +968,10 @@ var LifeGaugePlugin = class extends import_obsidian2.Plugin {
     if (penaltyInfo.isLate) {
       const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
       const statusMsg = penaltyInfo.multiplier < 0 ? `${-Math.round(penaltyInfo.multiplier * 100)}% points deducted` : `${reductionPercent}% points reduced`;
-      new import_obsidian2.Notice(`\u26A0\uFE0F Completed Late: ${task.text}${rewardMsg}
+      new import_obsidian3.Notice(`\u26A0\uFE0F Completed Late: ${task.text}${rewardMsg}
 ${statusMsg} due to delay of ${penaltyInfo.minutesLate} minutes.`, 5e3);
     } else {
-      new import_obsidian2.Notice(`\u2705 Mission Accomplished: ${task.text}${rewardMsg}`);
+      new import_obsidian3.Notice(`\u2705 Mission Accomplished: ${task.text}${rewardMsg}`);
     }
   }
   async syncTasksFromFile(file) {
@@ -792,13 +1006,13 @@ ${statusMsg} due to delay of ${penaltyInfo.minutesLate} minutes.`, 5e3);
           const newTotalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
           const newTitle = getCurrentTitle(newTotalXp, this.settings.titles);
           if (newTitle.name !== oldTitle.name) {
-            this.settings.maxHunger += 50;
-            this.settings.hunger += 50;
-            new import_obsidian2.Notice(`\u{1F389} CONGRATULATIONS! \u{1F389}
-You have reached a new title: ${newTitle.name}!
-Max Satiety +50!`, 5e3);
+            new import_obsidian3.Notice(`\u{1F389} CONGRATULATIONS! \u{1F389}
+You have reached a new title: ${newTitle.name}!`, 5e3);
           }
           changed = true;
+          if (this.settings.ai.enabled) {
+            await this.triggerAiAnalysis(`I just completed a task: ${task.text}. I earned ${rewardString}.`);
+          }
         }
         currentContent = updateTaskInContent(currentContent, task.originalLine, true, true, rewardString);
         fileContentChanged = true;
@@ -838,7 +1052,7 @@ Max Satiety +50!`, 5e3);
       if (this.pendingSync) {
         this.pendingSync = false;
         const file2 = this.app.vault.getAbstractFileByPath(this.settings.taskFilePath);
-        if (file2 instanceof import_obsidian2.TFile) {
+        if (file2 instanceof import_obsidian3.TFile) {
           await this.syncTasksFromFile(file2);
         }
       }
@@ -862,10 +1076,51 @@ Max Satiety +50!`, 5e3);
     const multiplier = 1 - minutesLate * this.settings.penaltyPoint / 100;
     return { multiplier, isLate: true, minutesLate };
   }
+  async triggerAiAnalysis(triggerPrompt) {
+    if (!this.settings.ai.enabled || !this.settings.ai.apiKey)
+      return;
+    const totalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
+    const title = getCurrentTitle(totalXp, this.settings.titles);
+    const behaviorIdx = Math.floor(Math.random() * this.AI_BEHAVIORS.length);
+    const currentBehavior = this.AI_BEHAVIORS[behaviorIdx];
+    const statsInfo = this.settings.stats.map((s) => {
+      const { level, progress } = calculateLevel(s.currentXp, s.baseXp, s.xpIncrement);
+      return `- ${s.name} (${s.id}): Level ${level} (${Math.floor(progress)}%)`;
+    }).join("\n");
+    const context = `
+You are ${this.settings.ai.name}, a helpful and cheeky companion for the user in a life-gamification plugin.
+Current Status:
+- Satiety (Hunger): ${Math.floor(this.settings.hunger)}/${this.settings.maxHunger}
+- Current Rank: ${title.name}
+- Total Coins: ${this.settings.coins}
+- Trigger Context: ${triggerPrompt}
+- Primary Behavioral Trait for this response: ${currentBehavior}
+
+Current Player Stats:
+${statsInfo}
+
+Personality Guidelines based on Stats:
+1. If "Strength" (STR) is high (Level 5+), be confident, bold, and energetic.
+2. If "Knowledge/Intelligence" (INT) is low (Level 1-2), be slightly confused, silly, or include a "goofy action" or a "dumb mistake" in your speech.
+3. If "Vitality" (VIT) is high, be overly healthy and enthusiastic about physical well-being.
+4. If "Dexterity" (DEX) is low, mention being clumsy or dropping something.
+5. If Satiety is low, act hungry or weak regardless of other stats.
+
+Rules:
+1. Speak as ${this.settings.ai.name}. Be brief (max 2 sentences).
+2. Based on the rules above, react to the user current status and the trigger context.
+3. Blend the "Primary Behavioral Trait" with the "Personality Guidelines" above.
+4. Output ONLY the speech of the character.
+`;
+    const response = await AIService.generateResponse(this.settings, context);
+    this.settings.lastAiResponse = response;
+    this.settings.lastAiTriggerTime = Date.now();
+    this.saveSettings();
+  }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
     const file = this.app.vault.getAbstractFileByPath(this.settings.taskFilePath);
-    if (file instanceof import_obsidian2.TFile) {
+    if (file instanceof import_obsidian3.TFile) {
       this.lastKnownContent = await this.app.vault.read(file);
     }
   }
@@ -896,7 +1151,7 @@ Max Satiety +50!`, 5e3);
     new AddRewardModal(this.app, this).open();
   }
 };
-var AddRewardModal = class extends import_obsidian2.Modal {
+var AddRewardModal = class extends import_obsidian3.Modal {
   constructor(app, plugin) {
     super(app);
     __publicField(this, "plugin");
@@ -909,29 +1164,29 @@ var AddRewardModal = class extends import_obsidian2.Modal {
   onOpen() {
     const { contentEl } = this;
     contentEl.createEl("h2", { text: "Add Custom Reward" });
-    new import_obsidian2.Setting(contentEl).setName("Reward Name").addText(
+    new import_obsidian3.Setting(contentEl).setName("Reward Name").addText(
       (text) => text.setValue(this.name).onChange((value) => {
         this.name = value;
       })
     );
-    new import_obsidian2.Setting(contentEl).setName("Icon").addText(
+    new import_obsidian3.Setting(contentEl).setName("Icon").addText(
       (text) => text.setValue(this.icon).onChange((value) => {
         this.icon = value || "\u{1F381}";
       })
     );
-    new import_obsidian2.Setting(contentEl).setName("Description").addText(
+    new import_obsidian3.Setting(contentEl).setName("Description").addText(
       (text) => text.setValue(this.description).onChange((value) => {
         this.description = value;
       })
     );
-    new import_obsidian2.Setting(contentEl).setName("Cost (Coins)").addText(
+    new import_obsidian3.Setting(contentEl).setName("Cost (Coins)").addText(
       (text) => text.setValue(this.cost.toString()).onChange((value) => {
         const val = parseInt(value);
         if (!isNaN(val))
           this.cost = val;
       })
     );
-    new import_obsidian2.Setting(contentEl).addButton(
+    new import_obsidian3.Setting(contentEl).addButton(
       (btn) => btn.setButtonText("Add to Shop").setCta().onClick(async () => {
         this.plugin.settings.customShopItems.push({
           id: `item-${Date.now()}`,
@@ -950,7 +1205,7 @@ var AddRewardModal = class extends import_obsidian2.Modal {
     contentEl.empty();
   }
 };
-var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
+var LifeGaugeSettingTab = class extends import_obsidian3.PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     __publicField(this, "plugin");
@@ -960,14 +1215,43 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
     const { containerEl } = this;
     containerEl.empty();
     containerEl.createEl("h2", { text: "Life Gauge Settings" });
-    new import_obsidian2.Setting(containerEl).setName("Avatar Path").setDesc("Path to your avatar image in the vault.").addText((text) => text.setValue(this.plugin.settings.avatarPath).onChange(async (value) => {
+    containerEl.createEl("h3", { text: "\u{1F916} AI Companion (Mascot)" });
+    new import_obsidian3.Setting(containerEl).setName("Enable AI Companion").setDesc("Turn on your AI companion. This will replace the Title system in the header.").addToggle((toggle) => toggle.setValue(this.plugin.settings.ai.enabled).onChange(async (value) => {
+      this.plugin.settings.ai.enabled = value;
+      await this.plugin.saveSettings();
+      this.display();
+    }));
+    if (this.plugin.settings.ai.enabled) {
+      new import_obsidian3.Setting(containerEl).setName("Companion Name").setDesc("How should your companion be called? (e.g. Paimon)").addText((text) => text.setValue(this.plugin.settings.ai.name).onChange(async (value) => {
+        this.plugin.settings.ai.name = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian3.Setting(containerEl).setName("AI Provider").addDropdown((dropdown) => dropdown.addOption("openai", "OpenAI").addOption("gemini", "Google Gemini").addOption("openrouter", "OpenRouter").setValue(this.plugin.settings.ai.provider).onChange(async (value) => {
+        this.plugin.settings.ai.provider = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian3.Setting(containerEl).setName("API Key").addText((text) => text.setPlaceholder("Enter your API key").setValue(this.plugin.settings.ai.apiKey).onChange(async (value) => {
+        this.plugin.settings.ai.apiKey = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian3.Setting(containerEl).setName("Model").setDesc("e.g. gpt-3.5-turbo, gemini-pro, etc.").addText((text) => text.setValue(this.plugin.settings.ai.model).onChange(async (value) => {
+        this.plugin.settings.ai.model = value;
+        await this.plugin.saveSettings();
+      }));
+      new import_obsidian3.Setting(containerEl).setName("Trigger Interval (Minutes)").setDesc("How often should the AI speak to you automatically?").addSlider((slider) => slider.setLimits(5, 720, 5).setValue(this.plugin.settings.ai.interval).setDynamicTooltip().onChange(async (value) => {
+        this.plugin.settings.ai.interval = value;
+        await this.plugin.saveSettings();
+      }));
+    }
+    containerEl.createEl("h3", { text: "\u{1F4C1} Task Configuration" });
+    new import_obsidian3.Setting(containerEl).setName("Avatar Path").setDesc("Path to your avatar image in the vault.").addText((text) => text.setValue(this.plugin.settings.avatarPath).onChange(async (value) => {
       this.plugin.settings.avatarPath = value;
       await this.plugin.saveSettings();
     }));
-    new import_obsidian2.Setting(containerEl).setName("Task File Path").setDesc("Path to the Markdown file containing your tasks.").addText((text) => text.setValue(this.plugin.settings.taskFilePath).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Task File Path").setDesc("Path to the Markdown file containing your tasks.").addText((text) => text.setValue(this.plugin.settings.taskFilePath).onChange(async (value) => {
       this.plugin.settings.taskFilePath = value;
       const file = this.app.vault.getAbstractFileByPath(value);
-      if (file instanceof import_obsidian2.TFile) {
+      if (file instanceof import_obsidian3.TFile) {
         this.plugin.lastKnownContent = await this.app.vault.read(file);
       } else {
         this.plugin.lastKnownContent = "";
@@ -975,7 +1259,7 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
       await this.plugin.saveSettings();
     }));
     containerEl.createEl("h3", { text: "\u{1F480} Penalty Configuration" });
-    new import_obsidian2.Setting(containerEl).setName("Penalty Multiplier (Penalty Point)").setDesc("Multiplier for all penalties. Higher values result in more XP lost for late tasks and hunger. \nFormula for late tasks: Points - (Min Late * Points / 100) * PenaltyPoint. \nFormula for hunger (per 30m): PenaltyPoint * (MaxSatiety * 0.3 - Satiety) / 4.").addText((text) => text.setPlaceholder("1").setValue(this.plugin.settings.penaltyPoint.toString()).onChange(async (value) => {
+    new import_obsidian3.Setting(containerEl).setName("Penalty Multiplier (Penalty Point)").setDesc("Multiplier for all penalties. Higher values result in more XP lost for late tasks and hunger. \nFormula for late tasks: Points - (Min Late * Points / 100) * PenaltyPoint. \nFormula for hunger (per 30m): PenaltyPoint * (MaxSatiety * 0.3 - Satiety) / 4.").addText((text) => text.setPlaceholder("1").setValue(this.plugin.settings.penaltyPoint.toString()).onChange(async (value) => {
       const val = parseFloat(value);
       if (!isNaN(val)) {
         this.plugin.settings.penaltyPoint = val;
@@ -998,21 +1282,21 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
         this.display();
       });
-      new import_obsidian2.Setting(statsDetails).setName("Stat Name").addText((text) => text.setValue(stat.name).onChange(async (value) => {
+      new import_obsidian3.Setting(statsDetails).setName("Stat Name").addText((text) => text.setValue(stat.name).onChange(async (value) => {
         this.plugin.settings.stats[index].name = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian2.Setting(statsDetails).setName("Stat Icon").addText((text) => text.setValue(stat.icon).onChange(async (value) => {
+      new import_obsidian3.Setting(statsDetails).setName("Stat Icon").addText((text) => text.setValue(stat.icon).onChange(async (value) => {
         this.plugin.settings.stats[index].icon = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian2.Setting(statsDetails).setName(`${stat.name} Color`).setDesc(`Color for the ${stat.name} progress bar.`).addColorPicker((color) => color.setValue(stat.color).onChange(async (value) => {
+      new import_obsidian3.Setting(statsDetails).setName(`${stat.name} Color`).setDesc(`Color for the ${stat.name} progress bar.`).addColorPicker((color) => color.setValue(stat.color).onChange(async (value) => {
         this.plugin.settings.stats[index].color = value;
         await this.plugin.saveSettings();
       }));
       statsDetails.createEl("hr");
     });
-    new import_obsidian2.Setting(statsDetails).setName("Add New Stat").setDesc("Create a new attribute to track.").addButton((btn) => btn.setButtonText("Add Stat").onClick(async () => {
+    new import_obsidian3.Setting(statsDetails).setName("Add New Stat").setDesc("Create a new attribute to track.").addButton((btn) => btn.setButtonText("Add Stat").onClick(async () => {
       this.plugin.settings.stats.push({
         id: `stat-${Date.now()}`,
         name: "New Stat",
@@ -1042,21 +1326,21 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
         this.display();
       });
-      new import_obsidian2.Setting(skillsDetails).setName("Skill Name").addText((text) => text.setValue(skill.name).onChange(async (value) => {
+      new import_obsidian3.Setting(skillsDetails).setName("Skill Name").addText((text) => text.setValue(skill.name).onChange(async (value) => {
         this.plugin.settings.skills[index].name = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian2.Setting(skillsDetails).setName("Skill Icon").addText((text) => text.setValue(skill.icon).onChange(async (value) => {
+      new import_obsidian3.Setting(skillsDetails).setName("Skill Icon").addText((text) => text.setValue(skill.icon).onChange(async (value) => {
         this.plugin.settings.skills[index].icon = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian2.Setting(skillsDetails).setName(`${skill.name} Color`).addColorPicker((color) => color.setValue(skill.color).onChange(async (value) => {
+      new import_obsidian3.Setting(skillsDetails).setName(`${skill.name} Color`).addColorPicker((color) => color.setValue(skill.color).onChange(async (value) => {
         this.plugin.settings.skills[index].color = value;
         await this.plugin.saveSettings();
       }));
       skillsDetails.createEl("hr");
     });
-    new import_obsidian2.Setting(skillsDetails).setName("Create New Skill").setDesc("Skills track your real-world progress (e.g., English, Java).").addButton((btn) => btn.setButtonText("Add Skill").onClick(async () => {
+    new import_obsidian3.Setting(skillsDetails).setName("Create New Skill").setDesc("Skills track your real-world progress (e.g., English, Java).").addButton((btn) => btn.setButtonText("Add Skill").onClick(async () => {
       this.plugin.settings.skills.push({
         id: `skill-${Date.now()}`,
         name: "New Skill",
@@ -1086,28 +1370,28 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
         this.display();
       });
-      new import_obsidian2.Setting(titlesDetails).setName("Title Name").addText((text) => text.setValue(title.name).onChange(async (value) => {
+      new import_obsidian3.Setting(titlesDetails).setName("Title Name").addText((text) => text.setValue(title.name).onChange(async (value) => {
         this.plugin.settings.titles[index].name = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian2.Setting(titlesDetails).setName("Icon").addText((text) => text.setValue(title.icon).onChange(async (value) => {
+      new import_obsidian3.Setting(titlesDetails).setName("Icon").addText((text) => text.setValue(title.icon).onChange(async (value) => {
         this.plugin.settings.titles[index].icon = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian2.Setting(titlesDetails).setName("XP Threshold").setDesc("The amount of XP required to receive this title.").addText((text) => text.setValue(title.threshold.toString()).onChange(async (value) => {
+      new import_obsidian3.Setting(titlesDetails).setName("XP Threshold").setDesc("The amount of XP required to receive this title.").addText((text) => text.setValue(title.threshold.toString()).onChange(async (value) => {
         const val = parseInt(value);
         if (!isNaN(val)) {
           this.plugin.settings.titles[index].threshold = val;
           await this.plugin.saveSettings();
         }
       }));
-      new import_obsidian2.Setting(titlesDetails).setName("Description").addTextArea((text) => text.setValue(title.description).onChange(async (value) => {
+      new import_obsidian3.Setting(titlesDetails).setName("Description").addTextArea((text) => text.setValue(title.description).onChange(async (value) => {
         this.plugin.settings.titles[index].description = value;
         await this.plugin.saveSettings();
       }));
       titlesDetails.createEl("hr");
     });
-    new import_obsidian2.Setting(titlesDetails).setName("Add New Title").addButton((btn) => btn.setButtonText("Add Title").onClick(async () => {
+    new import_obsidian3.Setting(titlesDetails).setName("Add New Title").addButton((btn) => btn.setButtonText("Add Title").onClick(async () => {
       this.plugin.settings.titles.push({
         threshold: 0,
         name: "New Title",
@@ -1133,19 +1417,19 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
         await this.plugin.saveSettings();
         this.display();
       });
-      new import_obsidian2.Setting(customShopItemsDetails).setName("Item Name").addText((text) => text.setValue(item.name).onChange(async (value) => {
+      new import_obsidian3.Setting(customShopItemsDetails).setName("Item Name").addText((text) => text.setValue(item.name).onChange(async (value) => {
         this.plugin.settings.customShopItems[index].name = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian2.Setting(customShopItemsDetails).setName("Icon").addText((text) => text.setValue(item.icon).setPlaceholder("\u{1F381}").onChange(async (value) => {
+      new import_obsidian3.Setting(customShopItemsDetails).setName("Icon").addText((text) => text.setValue(item.icon).setPlaceholder("\u{1F381}").onChange(async (value) => {
         this.plugin.settings.customShopItems[index].icon = value || "\u{1F381}";
         await this.plugin.saveSettings();
       }));
-      new import_obsidian2.Setting(customShopItemsDetails).setName("Description").addText((text) => text.setValue(item.description).onChange(async (value) => {
+      new import_obsidian3.Setting(customShopItemsDetails).setName("Description").addText((text) => text.setValue(item.description).onChange(async (value) => {
         this.plugin.settings.customShopItems[index].description = value;
         await this.plugin.saveSettings();
       }));
-      new import_obsidian2.Setting(customShopItemsDetails).setName("Cost (Coins)").addText((text) => text.setValue(item.cost.toString()).onChange(async (value) => {
+      new import_obsidian3.Setting(customShopItemsDetails).setName("Cost (Coins)").addText((text) => text.setValue(item.cost.toString()).onChange(async (value) => {
         const val = parseInt(value);
         if (!isNaN(val)) {
           this.plugin.settings.customShopItems[index].cost = val;
@@ -1154,7 +1438,7 @@ var LifeGaugeSettingTab = class extends import_obsidian2.PluginSettingTab {
       }));
       customShopItemsDetails.createEl("hr");
     });
-    new import_obsidian2.Setting(customShopItemsDetails).setName("Add New Item").addButton((btn) => btn.setButtonText("Add Item").onClick(async () => {
+    new import_obsidian3.Setting(customShopItemsDetails).setName("Add New Item").addButton((btn) => btn.setButtonText("Add Item").onClick(async () => {
       this.plugin.settings.customShopItems.push({
         id: `item-${Date.now()}`,
         name: "New Reward",
