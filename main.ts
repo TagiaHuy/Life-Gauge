@@ -371,7 +371,7 @@ export default class LifeGaugePlugin extends Plugin {
         }).join('\n');
 
         const context = `
-You are ${this.settings.ai.name}, a helpful and cheeky companion for the user in a life-gamification plugin.
+You are ${this.settings.ai.name}, a helpful and cheeky companion. Keep your response EXTREMELY SHORT (1-2 sentences, max 20 words).
 Current Status:
 - Satiety (Hunger): ${Math.floor(this.settings.hunger)}/${this.settings.maxHunger}
 - Current Rank: ${title.name}
@@ -398,6 +398,7 @@ Rules:
 
         const response = await AIService.generateResponse(this.settings, context);
         this.settings.lastAiResponse = response;
+        this.settings.ai.newResponse = true;
         this.settings.lastAiTriggerTime = Date.now();
         this.saveSettings();
     }

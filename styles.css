@@ -649,16 +649,11 @@
     background: var(--background-secondary);
     border: 1px solid var(--background-modifier-border);
     border-radius: 12px;
-    padding: 24px 160px 16px 16px; /* Space for legend/labels if needed */
+    padding: 24px 24px 40px 16px;
     margin-bottom: 24px;
     height: 250px;
     display: flex;
     flex-direction: column;
-}
-
-/* Extra padding for labels */
-.lg-chart-container {
-    padding-bottom: 40px;
 }
 
 .lg-chart-body {

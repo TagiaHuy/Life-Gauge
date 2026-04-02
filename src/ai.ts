@@ -30,7 +30,8 @@ export class AIService {
             },
             body: JSON.stringify({
                 model: model || 'gpt-3.5-turbo',
-                messages: [{ role: 'user', content: context }]
+                messages: [{ role: 'user', content: context }],
+                max_tokens: 50
             })
         });
         return response.json.choices[0].message.content;
@@ -42,7 +43,10 @@ export class AIService {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                contents: [{ parts: [{ text: context }] }]
+                contents: [{ parts: [{ text: context }] }],
+                generationConfig: {
+                    maxOutputTokens: 50
+                }
             })
         });
         return response.json.candidates[0].content.parts[0].text;
@@ -60,7 +64,8 @@ export class AIService {
             },
             body: JSON.stringify({
                 model: model || 'openai/gpt-3.5-turbo',
-                messages: [{ role: 'user', content: context }]
+                messages: [{ role: 'user', content: context }],
+                max_tokens: 50
             })
         });
         return response.json.choices[0].message.content;

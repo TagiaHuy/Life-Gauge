@@ -127,7 +127,8 @@ var DEFAULT_SETTINGS = {
     interval: 60,
     provider: "gemini",
     apiKey: "",
-    model: "gemini-pro"
+    model: "gemini-pro",
+    newResponse: false
   },
   lastAiResponse: "Hello! I am your companion. Keep me full and be productive!",
   lastAiTriggerTime: Date.now()
@@ -402,7 +403,14 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       displayDesc = this.plugin.settings.lastAiResponse;
     }
     info.createEl("div", { cls: "lg-nickname", text: displayName });
-    info.createEl("div", { cls: "lg-description", text: displayDesc });
+    const descEl = info.createEl("div", { cls: "lg-description" });
+    if (this.plugin.settings.ai.enabled && this.plugin.settings.ai.newResponse) {
+      this.runTypewriter(descEl, displayDesc);
+      this.plugin.settings.ai.newResponse = false;
+      this.plugin.saveSettings();
+    } else {
+      descEl.textContent = displayDesc;
+    }
     if (this.plugin.settings.ai.enabled) {
       return;
     }
@@ -411,6 +419,13 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       info.createEl("div", { cls: "lg-next-rank", text: `\u{1F51C} ${neededForNext} XP to become ${nextTitle.name}` });
     } else {
       info.createEl("div", { cls: "lg-next-rank", text: `\u{1F3C6} You have reached the pinnacle of glory!` });
+    }
+  }
+  async runTypewriter(el, text, speed = 25) {
+    el.textContent = "";
+    for (let i = 0; i < text.length; i++) {
+      el.textContent += text.charAt(i);
+      await new Promise((resolve) => setTimeout(resolve, speed));
     }
   }
   renderSatiety(parent) {
@@ -459,6 +474,8 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
           this.plugin.settings.coins -= item.cost;
           this.plugin.settings.hunger = Math.min(this.plugin.settings.maxHunger, this.plugin.settings.hunger + item.boost);
           new import_obsidian.Notice(`Consumed ${item.name}! +${item.boost} Satiety.`);
+          const aiPrompt = `I just bought and consumed ${item.name} for ${item.cost} coins. My satiety increased by ${item.boost} points! Mmm, delicious.`;
+          await this.plugin.triggerAiAnalysis(aiPrompt);
           await this.plugin.saveSettings();
           this.update();
         }
@@ -495,6 +512,8 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
             this.plugin.settings.coins -= item.cost;
             this.purchasedItemIds.add(item.id);
             new import_obsidian.Notice(`\u{1F389} Congratulations! You have received the reward: ${item.name}`);
+            const aiPrompt = `I spent ${item.cost} coins to claim a custom reward: "${item.name}". I've earned this through my hard work!`;
+            await this.plugin.triggerAiAnalysis(aiPrompt);
             await this.plugin.saveSettings();
             this.update();
           }
@@ -685,9 +704,14 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
           const statusMsg = penaltyInfo.multiplier < 0 ? `${-Math.round(penaltyInfo.multiplier * 100)}% points deducted` : `${reductionPercent}% points reduced`;
           new import_obsidian.Notice(`\u26A0\uFE0F Completed Late: ${task.text}${rewardMsg}
 ${statusMsg} due to delay of ${penaltyInfo.minutesLate} minutes.`, 5e3);
+          const aiPrompt = `I finished the task: "${task.text}". Rewards: ${rewardMsg}. Note: It was LATE by ${penaltyInfo.minutesLate} minutes, so I received a penalty: ${statusMsg}.`;
+          await this.plugin.triggerAiAnalysis(aiPrompt);
         } else {
           new import_obsidian.Notice(`\u2705 Mission Accomplished: ${task.text}${rewardMsg}`);
+          const aiPrompt = `I just finished the mission: "${task.text}"! I earned: ${rewardMsg}. I'm feeling productive!`;
+          await this.plugin.triggerAiAnalysis(aiPrompt);
         }
+        this.update();
       } else {
         this.plugin.applyUnreward(task);
         const index = this.plugin.settings.completedTasks.indexOf(taskId);
@@ -744,7 +768,8 @@ var AIService = class {
       },
       body: JSON.stringify({
         model: model || "gpt-3.5-turbo",
-        messages: [{ role: "user", content: context }]
+        messages: [{ role: "user", content: context }],
+        max_tokens: 50
       })
     });
     return response.json.choices[0].message.content;
@@ -755,7 +780,10 @@ var AIService = class {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: context }] }]
+        contents: [{ parts: [{ text: context }] }],
+        generationConfig: {
+          maxOutputTokens: 50
+        }
       })
     });
     return response.json.candidates[0].content.parts[0].text;
@@ -772,7 +800,8 @@ var AIService = class {
       },
       body: JSON.stringify({
         model: model || "openai/gpt-3.5-turbo",
-        messages: [{ role: "user", content: context }]
+        messages: [{ role: "user", content: context }],
+        max_tokens: 50
       })
     });
     return response.json.choices[0].message.content;
@@ -1088,7 +1117,7 @@ You have reached a new title: ${newTitle.name}!`, 5e3);
       return `- ${s.name} (${s.id}): Level ${level} (${Math.floor(progress)}%)`;
     }).join("\n");
     const context = `
-You are ${this.settings.ai.name}, a helpful and cheeky companion for the user in a life-gamification plugin.
+You are ${this.settings.ai.name}, a helpful and cheeky companion. Keep your response EXTREMELY SHORT (1-2 sentences, max 20 words).
 Current Status:
 - Satiety (Hunger): ${Math.floor(this.settings.hunger)}/${this.settings.maxHunger}
 - Current Rank: ${title.name}
@@ -1114,6 +1143,7 @@ Rules:
 `;
     const response = await AIService.generateResponse(this.settings, context);
     this.settings.lastAiResponse = response;
+    this.settings.ai.newResponse = true;
     this.settings.lastAiTriggerTime = Date.now();
     this.saveSettings();
   }

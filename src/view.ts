@@ -158,8 +158,15 @@ export class LifeGaugeView extends ItemView {
         }
 
         info.createEl('div', { cls: 'lg-nickname', text: displayName });
-        info.createEl('div', { cls: 'lg-description', text: displayDesc });
-
+        const descEl = info.createEl('div', { cls: 'lg-description' });
+        
+        if (this.plugin.settings.ai.enabled && this.plugin.settings.ai.newResponse) {
+            this.runTypewriter(descEl, displayDesc);
+            this.plugin.settings.ai.newResponse = false;
+            this.plugin.saveSettings();
+        } else {
+            descEl.textContent = displayDesc;
+        }
         if (this.plugin.settings.ai.enabled) {
             return; // Skip rank info if AI is enabled
         }
@@ -169,6 +176,14 @@ export class LifeGaugeView extends ItemView {
             info.createEl('div', { cls: 'lg-next-rank', text: `🔜 ${neededForNext} XP to become ${nextTitle.name}` });
         } else {
             info.createEl('div', { cls: 'lg-next-rank', text: `🏆 You have reached the pinnacle of glory!` });
+        }
+    }
+
+    private async runTypewriter(el: HTMLElement, text: string, speed: number = 25) {
+        el.textContent = "";
+        for (let i = 0; i < text.length; i++) {
+            el.textContent += text.charAt(i);
+            await new Promise(resolve => setTimeout(resolve, speed));
         }
     }
 
@@ -232,6 +247,10 @@ export class LifeGaugeView extends ItemView {
                     this.plugin.settings.coins -= item.cost;
                     this.plugin.settings.hunger = Math.min(this.plugin.settings.maxHunger, this.plugin.settings.hunger + item.boost);
                     new Notice(`Consumed ${item.name}! +${item.boost} Satiety.`);
+                    
+                    const aiPrompt = `I just bought and consumed ${item.name} for ${item.cost} coins. My satiety increased by ${item.boost} points! Mmm, delicious.`;
+                    await this.plugin.triggerAiAnalysis(aiPrompt);
+                    
                     await this.plugin.saveSettings();
                     this.update();
                 }
@@ -279,6 +298,10 @@ export class LifeGaugeView extends ItemView {
                         this.plugin.settings.coins -= item.cost;
                         this.purchasedItemIds.add(item.id);
                         new Notice(`🎉 Congratulations! You have received the reward: ${item.name}`);
+                        
+                        const aiPrompt = `I spent ${item.cost} coins to claim a custom reward: "${item.name}". I've earned this through my hard work!`;
+                        await this.plugin.triggerAiAnalysis(aiPrompt);
+                        
                         await this.plugin.saveSettings();
                         this.update();
                     }
@@ -527,9 +550,15 @@ export class LifeGaugeView extends ItemView {
                     const reductionPercent = Math.round((1 - penaltyInfo.multiplier) * 100);
                     const statusMsg = penaltyInfo.multiplier < 0 ? `${-Math.round(penaltyInfo.multiplier * 100)}% points deducted` : `${reductionPercent}% points reduced`;
                     new Notice(`⚠️ Completed Late: ${task.text}${rewardMsg}\n${statusMsg} due to delay of ${penaltyInfo.minutesLate} minutes.`, 5000);
+                    
+                    const aiPrompt = `I finished the task: "${task.text}". Rewards: ${rewardMsg}. Note: It was LATE by ${penaltyInfo.minutesLate} minutes, so I received a penalty: ${statusMsg}.`;
+                    await this.plugin.triggerAiAnalysis(aiPrompt);
                 } else {
                     new Notice(`✅ Mission Accomplished: ${task.text}${rewardMsg}`);
+                    const aiPrompt = `I just finished the mission: "${task.text}"! I earned: ${rewardMsg}. I'm feeling productive!`;
+                    await this.plugin.triggerAiAnalysis(aiPrompt);
                 }
+                this.update(); // Refresh view to show AI's reaction
             } else {
                 this.plugin.applyUnreward(task);
                 const index = this.plugin.settings.completedTasks.indexOf(taskId);

@@ -23,6 +23,7 @@ export interface AISettings {
     provider: 'openai' | 'gemini' | 'openrouter';
     apiKey: string;
     model: string;
+    newResponse: boolean;
 }
 
 export interface DailyXpLog {
@@ -152,7 +153,8 @@ export const DEFAULT_SETTINGS: LifeGaugeSettings = {
         interval: 60,
         provider: 'gemini',
         apiKey: "",
-        model: "gemini-pro"
+        model: "gemini-pro",
+        newResponse: false
     },
     lastAiResponse: "Hello! I am your companion. Keep me full and be productive!",
     lastAiTriggerTime: Date.now()
