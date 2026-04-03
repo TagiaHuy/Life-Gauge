@@ -16,6 +16,12 @@ export interface Title {
     icon: string;
     description: string;
 }
+
+export interface ChatMessage {
+    role: 'user' | 'assistant' | 'system';
+    content: string;
+}
+
 export interface AISettings {
     enabled: boolean;
     name: string;
@@ -24,6 +30,8 @@ export interface AISettings {
     apiKey: string;
     model: string;
     newResponse: boolean;
+    chatHistory: ChatMessage[];
+    maxHistoryLength: number;
 }
 
 export interface DailyXpLog {
@@ -154,7 +162,9 @@ export const DEFAULT_SETTINGS: LifeGaugeSettings = {
         provider: 'gemini',
         apiKey: "",
         model: "gemini-pro",
-        newResponse: false
+        newResponse: false,
+        chatHistory: [],
+        maxHistoryLength: 10
     },
     lastAiResponse: "Hello! I am your companion. Keep me full and be productive!",
     lastAiTriggerTime: Date.now()

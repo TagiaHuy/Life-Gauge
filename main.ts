@@ -64,11 +64,9 @@ export default class LifeGaugePlugin extends Plugin {
         task.rewards.forEach((reward: any) => {
             const stat = this.settings.stats.find(s => s.id === reward.statId);
             if (stat) {
-                // Formula: random(1, 15) + (requiredXp - 100) / 10
-                const { requiredXp } = calculateLevel(stat.currentXp, stat.baseXp, stat.xpIncrement);
+                // Formula: random(1, 15)
                 const baseXP = Math.floor(Math.random() * 15) + 1;
-                const bonusXP = (requiredXp - 100) / 10;
-                const finalReward = (baseXP + bonusXP) * finalMultiplier;
+                const finalReward = baseXP * finalMultiplier;
 
                 stat.currentXp += finalReward;
                 totalXpAwarded += finalReward;
@@ -80,10 +78,8 @@ export default class LifeGaugePlugin extends Plugin {
         task.skills.forEach((skillName: string) => {
             const skill = this.settings.skills.find(s => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
             if (skill) {
-                const { requiredXp } = calculateLevel(skill.currentXp, skill.baseXp, skill.xpIncrement);
                 const baseXP = Math.floor(Math.random() * 15) + 1;
-                const bonusXP = (requiredXp - 100) / 10;
-                const finalReward = (baseXP + bonusXP) * finalMultiplier;
+                const finalReward = baseXP * finalMultiplier;
 
                 skill.currentXp += finalReward;
                 if (skill.currentXp < 0) skill.currentXp = 0;
@@ -364,39 +360,65 @@ export default class LifeGaugePlugin extends Plugin {
         const behaviorIdx = Math.floor(Math.random() * this.AI_BEHAVIORS.length);
         const currentBehavior = this.AI_BEHAVIORS[behaviorIdx];
 
-        // Format stats for context
+        // 1. Build System Prompt (Who I am and Rules)
+        const systemPrompt = `
+You are ${this.settings.ai.name}, a helpful and cheeky companion. Keep your response EXTREMELY SHORT (1-2 sentences, max 20 words).
+Rules:
+1. Speak as ${this.settings.ai.name}. Be brief (max 2 sentences).
+2. React to the user's current status and the trigger context.
+3. Blend the "Primary Behavioral Trait" with the "Personality Guidelines" below.
+4. Output ONLY the speech of the character.
+
+Personality Guidelines based on Stats:
+1. If "Strength" (STR) is high (Level 5+), be confident, bold, and energetic.
+2. If "Knowledge/Intelligence" (INT) is low (Level 1-2), be slightly confused, silly.
+3. If "Vitality" (VIT) is high, be overly healthy and enthusiastic.
+4. If "Dexterity" (DEX) is low, mention being clumsy.
+5. If Satiety is low, act hungry or weak regardless of other stats.
+`;
+
+        // 2. Build Current User Prompt (Status + Trigger)
         const statsInfo = this.settings.stats.map(s => {
             const { level, progress } = calculateLevel(s.currentXp, s.baseXp, s.xpIncrement);
             return `- ${s.name} (${s.id}): Level ${level} (${Math.floor(progress)}%)`;
         }).join('\n');
 
-        const context = `
-You are ${this.settings.ai.name}, a helpful and cheeky companion. Keep your response EXTREMELY SHORT (1-2 sentences, max 20 words).
+        const userPrompt = `
+[CONTEXT UPDATE]
 Current Status:
 - Satiety (Hunger): ${Math.floor(this.settings.hunger)}/${this.settings.maxHunger}
 - Current Rank: ${title.name}
 - Total Coins: ${this.settings.coins}
-- Trigger Context: ${triggerPrompt}
-- Primary Behavioral Trait for this response: ${currentBehavior}
+- Trigger: ${triggerPrompt}
+- Current Mood Trait: ${currentBehavior}
 
 Current Player Stats:
 ${statsInfo}
-
-Personality Guidelines based on Stats:
-1. If "Strength" (STR) is high (Level 5+), be confident, bold, and energetic.
-2. If "Knowledge/Intelligence" (INT) is low (Level 1-2), be slightly confused, silly, or include a "goofy action" or a "dumb mistake" in your speech.
-3. If "Vitality" (VIT) is high, be overly healthy and enthusiastic about physical well-being.
-4. If "Dexterity" (DEX) is low, mention being clumsy or dropping something.
-5. If Satiety is low, act hungry or weak regardless of other stats.
-
-Rules:
-1. Speak as ${this.settings.ai.name}. Be brief (max 2 sentences).
-2. Based on the rules above, react to the user current status and the trigger context.
-3. Blend the "Primary Behavioral Trait" with the "Personality Guidelines" above.
-4. Output ONLY the speech of the character.
 `;
 
-        const response = await AIService.generateResponse(this.settings, context);
+        // 3. Generate Response using history
+        const response = await AIService.generateResponse(
+            this.settings, 
+            systemPrompt, 
+            this.settings.ai.chatHistory || [], 
+            userPrompt
+        );
+
+        // 4. Update History
+        if (!this.settings.ai.chatHistory) this.settings.ai.chatHistory = [];
+        
+        // Add the interaction to history (we summarize the user prompt to save tokens/space)
+        const historyEntry = `Action: ${triggerPrompt} (Satiety: ${Math.floor(this.settings.hunger)})`;
+        this.settings.ai.chatHistory.push({ role: 'user', content: historyEntry });
+        this.settings.ai.chatHistory.push({ role: 'assistant', content: response });
+
+        // Prune history
+        const maxLen = this.settings.ai.maxHistoryLength || 10;
+        if (this.settings.ai.chatHistory.length > maxLen * 2) {
+            this.settings.ai.chatHistory = this.settings.ai.chatHistory.slice(-maxLen * 2);
+        }
+
+        // 5. Save state
         this.settings.lastAiResponse = response;
         this.settings.ai.newResponse = true;
         this.settings.lastAiTriggerTime = Date.now();

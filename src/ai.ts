@@ -1,17 +1,18 @@
 import { requestUrl } from 'obsidian';
+import { ChatMessage } from './data';
 
 export class AIService {
-    static async generateResponse(settings: any, context: string): Promise<string> {
+    static async generateResponse(settings: any, systemPrompt: string, history: ChatMessage[], currentPrompt: string): Promise<string> {
         const { provider, apiKey, model } = settings.ai;
         if (!apiKey) return "API Key is missing. Please check settings.";
 
         try {
             if (provider === 'openai') {
-                return await this.callOpenAI(apiKey, model, context);
+                return await this.callOpenAI(apiKey, model, systemPrompt, history, currentPrompt);
             } else if (provider === 'gemini') {
-                return await this.callGemini(apiKey, model, context);
+                return await this.callGemini(apiKey, model, systemPrompt, history, currentPrompt);
             } else if (provider === 'openrouter') {
-                return await this.callOpenRouter(apiKey, model, context);
+                return await this.callOpenRouter(apiKey, model, systemPrompt, history, currentPrompt);
             }
             return "Unsupported provider.";
         } catch (e: any) {
@@ -20,7 +21,13 @@ export class AIService {
         }
     }
 
-    private static async callOpenAI(apiKey: string, model: string, context: string) {
+    private static async callOpenAI(apiKey: string, model: string, systemPrompt: string, history: ChatMessage[], currentPrompt: string) {
+        const messages = [
+            { role: 'system', content: systemPrompt },
+            ...history,
+            { role: 'user', content: currentPrompt }
+        ];
+
         const response = await requestUrl({
             url: 'https://api.openai.com/v1/chat/completions',
             method: 'POST',
@@ -30,29 +37,61 @@ export class AIService {
             },
             body: JSON.stringify({
                 model: model || 'gpt-3.5-turbo',
-                messages: [{ role: 'user', content: context }],
-                max_tokens: 50
+                messages: messages,
+                max_tokens: 100
             })
         });
         return response.json.choices[0].message.content;
     }
 
-    private static async callGemini(apiKey: string, model: string, context: string) {
+    private static async callGemini(apiKey: string, model: string, systemPrompt: string, history: ChatMessage[], currentPrompt: string) {
+        // Gemini uses 'model' instead of 'assistant' for role
+        const contents = history.map(m => ({
+            role: m.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: m.content }]
+        }));
+
+        // Add current prompt
+        // We include system prompt in the first user message for Gemini or as a separate system instruction if supported
+        // For simplicity and compatibility, we'll prepended system prompt to the first message or current message if history is empty
+        if (contents.length === 0) {
+            contents.push({
+                role: 'user',
+                parts: [{ text: `${systemPrompt}\n\n${currentPrompt}` }]
+            });
+        } else {
+            // Prepend system prompt to the first user message in history
+            const firstUserMsg = contents.find(c => c.role === 'user');
+            if (firstUserMsg) {
+                firstUserMsg.parts[0].text = `${systemPrompt}\n\n${firstUserMsg.parts[0].text}`;
+            }
+            contents.push({
+                role: 'user',
+                parts: [{ text: currentPrompt }]
+            });
+        }
+
         const response = await requestUrl({
             url: `https://generativelanguage.googleapis.com/v1beta/models/${model || 'gemini-pro'}:generateContent?key=${apiKey}`,
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                contents: [{ parts: [{ text: context }] }],
+                contents: contents,
                 generationConfig: {
-                    maxOutputTokens: 50
+                    maxOutputTokens: 100
                 }
             })
         });
         return response.json.candidates[0].content.parts[0].text;
     }
 
-    private static async callOpenRouter(apiKey: string, model: string, context: string) {
+    private static async callOpenRouter(apiKey: string, model: string, systemPrompt: string, history: ChatMessage[], currentPrompt: string) {
+        const messages = [
+            { role: 'system', content: systemPrompt },
+            ...history,
+            { role: 'user', content: currentPrompt }
+        ];
+
         const response = await requestUrl({
             url: 'https://openrouter.ai/api/v1/chat/completions',
             method: 'POST',
@@ -64,8 +103,8 @@ export class AIService {
             },
             body: JSON.stringify({
                 model: model || 'openai/gpt-3.5-turbo',
-                messages: [{ role: 'user', content: context }],
-                max_tokens: 50
+                messages: messages,
+                max_tokens: 100
             })
         });
         return response.json.choices[0].message.content;
