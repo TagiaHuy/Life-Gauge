@@ -27,7 +27,7 @@ export function getTaskKey(task: LifeGaugeTask): string {
     return `${task.text}:${statsKey}:${task.date || ''}:${task.time || ''}:${task.occurrenceIndex}`;
 }
 
-export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
+export function parseTasks(content: string, stats: Stat[], requireDeadline: boolean = true): LifeGaugeTask[] {
     const lines = content.split('\n');
     const tasks: LifeGaugeTask[] = [];
     
@@ -99,8 +99,8 @@ export function parseTasks(content: string, stats: Stat[]): LifeGaugeTask[] {
             }
             remainingText = remainingText.replace(skillRegex, '').trim();
 
-            // Mandatory deadline check: Skip tasks that don't have a date or time
-            if (!date && !time) return;
+            // Mandatory deadline check: Skip tasks that don't have a date or time if required
+            if (requireDeadline && !date && !time) return;
 
             // Calculate occurrence index for duplicate detection
             const baseKey = `${remainingText}:${rewards.map(r => r.statId).sort().join(',')}:${date || ''}:${time || ''}`;

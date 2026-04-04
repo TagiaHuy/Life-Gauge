@@ -48,6 +48,16 @@ export interface CustomShopItem {
     cost: number;
 }
 
+export interface Goal {
+    id: string;
+    title: string;
+    description: string;
+    deadline: string; // ISO date string or "YYYY-MM-DD"
+    filepath: string;
+    createdAt: number;
+    isCompleted: boolean;
+}
+
 export interface LifeGaugeSettings {
     avatarPath: string;
     taskFilePath: string;
@@ -66,6 +76,7 @@ export interface LifeGaugeSettings {
     ai: AISettings;
     lastAiResponse: string;
     lastAiTriggerTime: number;
+    goals: Goal[];
 }
 
 export const DEFAULT_STATS: Stat[] = [
@@ -167,7 +178,8 @@ export const DEFAULT_SETTINGS: LifeGaugeSettings = {
         maxHistoryLength: 10
     },
     lastAiResponse: "Hello! I am your companion. Keep me full and be productive!",
-    lastAiTriggerTime: Date.now()
+    lastAiTriggerTime: Date.now(),
+    goals: []
 };
 
 export function formatDate(date: Date): string {

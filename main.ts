@@ -1,5 +1,5 @@
 import { Plugin, PluginSettingTab, App, Setting, normalizePath, TFile, Notice, Modal } from 'obsidian';
-import { LifeGaugeSettings, DEFAULT_SETTINGS, Stat, DEFAULT_STATS, getCurrentTitle, calculateLevel, formatDate } from './src/data';
+import { LifeGaugeSettings, DEFAULT_SETTINGS, Stat, DEFAULT_STATS, getCurrentTitle, calculateLevel, formatDate, Goal } from './src/data';
 import { LifeGaugeView, VIEW_TYPE_LIFE_GAUGE } from './src/view';
 import { parseTasks, getTaskKey, updateTaskInContent } from './src/parser';
 import { AIService } from './src/ai';
@@ -36,8 +36,27 @@ export default class LifeGaugePlugin extends Plugin {
                 if (this.settings.ai.enabled) {
                     const now = Date.now();
                     const intervalMs = this.settings.ai.interval * 60 * 1000;
+                    
+                    // Periodic check-in
                     if (now - this.settings.lastAiTriggerTime >= intervalMs) {
                         await this.triggerAiAnalysis("It's been a while! How are things going?");
+                    }
+
+                    // Goal Reminders (Daily check or approaching deadline)
+                    const activeGoals = this.settings.goals.filter(g => !g.isCompleted);
+                    for (const goal of activeGoals) {
+                        const deadline = new Date(goal.deadline).getTime();
+                        const diffMs = deadline - now;
+                        const diffDays = diffMs / (1000 * 60 * 60 * 24);
+
+                        if (diffDays > 0 && diffDays <= 1) { // Deadline within 24 hours
+                             // Avoid spamming; could add a 'lastReminded' field to Goal if needed
+                             // For now, simple check based on a broad window
+                             const hourSinceLastTrigger = (now - this.settings.lastAiTriggerTime) / (1000 * 60 * 60);
+                             if (hourSinceLastTrigger >= 1) {
+                                await this.triggerAiAnalysis(`The deadline for my goal "${goal.description}" is very close (tomorrow)! I need to hurry up!`);
+                             }
+                        }
                     }
                 }
 
@@ -401,7 +420,8 @@ ${statsInfo}
             this.settings, 
             systemPrompt, 
             this.settings.ai.chatHistory || [], 
-            userPrompt
+            userPrompt,
+            100
         );
 
         // 4. Update History
@@ -464,8 +484,124 @@ ${statsInfo}
         });
     }
 
-    showAddRewardModal() {
-        new AddRewardModal(this.app, this).open();
+    showAddGoalModal() {
+        new AddGoalModal(this.app, this).open();
+    }
+
+    async generateGoalPlan(goal: Goal) {
+        if (!this.settings.ai.enabled || !this.settings.ai.apiKey) {
+            new Notice("AI Companion is not configured. Please enable it in settings.");
+            return;
+        }
+
+        const systemPrompt = `You are ${this.settings.ai.name}, an expert life planner. Create a detailed, structured plan (TODO list) for the user's goal.
+Output ONLY the markdown tasks, nothing else. Format: - [ ] Task description (Stat1, Stat2) @{YYYY-MM-DD}
+Stats available: ${this.settings.stats.map(s => s.name).join(', ')}.
+Assign a deadline for each task based on the final goal deadline: ${goal.deadline}.
+Keep it realistic and actionable.`;
+
+        const userPrompt = `Goal: ${goal.description}\nDeadline: ${goal.deadline}`;
+
+        const response = await AIService.generateResponse(this.settings, systemPrompt, [], userPrompt, 2000);
+        
+        const file = this.app.vault.getAbstractFileByPath(goal.filepath);
+        if (file instanceof TFile) {
+            const currentContent = await this.app.vault.read(file);
+            const newContent = currentContent + "\n\n## AI Drafted Plan\n" + response;
+            await this.app.vault.modify(file, newContent);
+            new Notice(`${this.settings.ai.name} has created a plan for you!`);
+        }
+    }
+}
+
+class AddGoalModal extends Modal {
+    plugin: LifeGaugePlugin;
+    title: string = "";
+    description: string = "";
+    deadline: string = formatDate(new Date());
+
+    constructor(app: App, plugin: LifeGaugePlugin) {
+        super(app);
+        this.plugin = plugin;
+    }
+
+    onOpen() {
+        const { contentEl } = this;
+        contentEl.createEl("h2", { text: "Set a New Goal" });
+
+        new Setting(contentEl)
+            .setName("Goal Title")
+            .setDesc("A short name for your goal")
+            .addText((text) =>
+                text.setValue(this.title).onChange((value) => {
+                    this.title = value;
+                })
+            );
+
+        new Setting(contentEl)
+            .setName("Description")
+            .setDesc("More details about what you want to achieve")
+            .addTextArea((text) =>
+                text.setValue(this.description).onChange((value) => {
+                    this.description = value;
+                })
+            );
+
+        new Setting(contentEl)
+            .setName("Deadline")
+            .addText((text) => {
+                text.inputEl.type = "date";
+                text.setValue(this.deadline).onChange((value) => {
+                    this.deadline = value;
+                });
+            });
+
+        new Setting(contentEl).addButton((btn) =>
+            btn
+                .setButtonText("Confirm Goal")
+                .setCta()
+                .onClick(async () => {
+                    if (!this.title) {
+                        new Notice("Please enter a goal title.");
+                        return;
+                    }
+
+                    const goalId = `goal-${Date.now()}`;
+                    const folderPath = "Goals";
+                    if (!await this.app.vault.adapter.exists(folderPath)) {
+                        await this.app.vault.createFolder(folderPath);
+                    }
+
+                    const fileName = `${this.title.replace(/[\\/:*?"<>|]/g, "")}.md`;
+                    const filepath = normalizePath(`${folderPath}/${fileName}`);
+                    
+                    if (await this.app.vault.adapter.exists(filepath)) {
+                        new Notice("A goal with this name already exists.");
+                        return;
+                    }
+
+                    const template = `# Goal: ${this.title}\nDescription: ${this.description}\nDeadline: ${this.deadline}\n\n## Tasks\n`;
+                    await this.app.vault.create(filepath, template);
+
+                    this.plugin.settings.goals.push({
+                        id: goalId,
+                        title: this.title,
+                        description: this.description,
+                        deadline: this.deadline,
+                        filepath: filepath,
+                        createdAt: Date.now(),
+                        isCompleted: false
+                    });
+
+                    await this.plugin.saveSettings();
+                    this.close();
+                })
+        );
+    }
+
+    onClose() {
+        const { contentEl } = this;
+        contentEl.empty();
     }
 }
 

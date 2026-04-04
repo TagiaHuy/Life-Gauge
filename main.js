@@ -128,10 +128,13 @@ var DEFAULT_SETTINGS = {
     provider: "gemini",
     apiKey: "",
     model: "gemini-pro",
-    newResponse: false
+    newResponse: false,
+    chatHistory: [],
+    maxHistoryLength: 10
   },
   lastAiResponse: "Hello! I am your companion. Keep me full and be productive!",
-  lastAiTriggerTime: Date.now()
+  lastAiTriggerTime: Date.now(),
+  goals: []
 };
 function formatDate(date) {
   const year = date.getFullYear();
@@ -171,7 +174,7 @@ function getTaskKey(task) {
   const statsKey = (task.rewards || []).map((r) => r.statId).sort().join(",");
   return `${task.text}:${statsKey}:${task.date || ""}:${task.time || ""}:${task.occurrenceIndex}`;
 }
-function parseTasks(content, stats) {
+function parseTasks(content, stats, requireDeadline = true) {
   const lines = content.split("\n");
   const tasks = [];
   const taskRegex = /^\s*-\s*\[([ x])\]\s*(.+?)\s*$/;
@@ -226,7 +229,7 @@ function parseTasks(content, stats) {
         skills.push(sMatch[1].toLowerCase());
       }
       remainingText = remainingText.replace(skillRegex, "").trim();
-      if (!date && !time)
+      if (requireDeadline && !date && !time)
         return;
       const baseKey = `${remainingText}:${rewards.map((r) => r.statId).sort().join(",")}:${date || ""}:${time || ""}`;
       const occurrenceIndex = occurrenceMap.get(baseKey) || 0;
@@ -296,6 +299,7 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     __publicField(this, "tasks", []);
     __publicField(this, "isUpdating", false);
     __publicField(this, "activeTab", "main");
+    __publicField(this, "expandedGoalId", null);
     __publicField(this, "purchasedItemIds", /* @__PURE__ */ new Set());
     this.plugin = plugin;
   }
@@ -329,6 +333,8 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
         this.renderShop(contentEl);
       } else if (this.activeTab === "stats") {
         this.renderStatsTab(contentEl);
+      } else if (this.activeTab === "goals") {
+        this.renderGoalsTab(contentEl);
       } else {
         this.renderStats(contentEl);
         if (this.plugin.settings.skills.length > 0) {
@@ -367,7 +373,8 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     const tabs = [
       { id: "main", name: "Dashboard", icon: "\u{1F3E0}" },
       { id: "shop", name: "Shop", icon: "\u{1F3EA}" },
-      { id: "stats", name: "Stats", icon: "\u{1F4CA}" }
+      { id: "stats", name: "Stats", icon: "\u{1F4CA}" },
+      { id: "goals", name: "Goals", icon: "\u{1F3AF}" }
     ];
     tabs.forEach((t) => {
       const tabBtn = tabNav.createEl("button", { cls: `lg-tab-btn ${this.activeTab === t.id ? "is-active" : ""}` });
@@ -734,22 +741,149 @@ You have reached a new title: ${newTitle.name}!`, 5e3);
       this.plugin.isInternalChange = false;
     }
   }
+  async renderGoalsTab(parent) {
+    const container = parent.createEl("div", { cls: "lg-goals-container" });
+    const header = container.createEl("div", { cls: "lg-goals-header" });
+    header.createEl("h3", { text: "\u{1F3AF} Active Goals", cls: "lg-section-title" });
+    const addGoalBtn = header.createEl("button", { text: "\u2795 Set Goal", cls: "lg-add-goal-btn" });
+    addGoalBtn.addEventListener("click", () => {
+      this.plugin.showAddGoalModal();
+    });
+    const activeGoals = this.plugin.settings.goals.filter((g) => !g.isCompleted);
+    const completedGoals = this.plugin.settings.goals.filter((g) => g.isCompleted);
+    if (activeGoals.length === 0) {
+      container.createEl("div", { text: "No active goals. Set one to start your journey!", cls: "lg-no-items" });
+    } else {
+      const goalsList = container.createEl("div", { cls: "lg-goals-list" });
+      for (const goal of activeGoals) {
+        await this.renderGoalCard(goalsList, goal);
+      }
+    }
+    if (completedGoals.length > 0) {
+      const completedSection = container.createEl("details", { cls: "lg-completed-goals-details" });
+      const summary = completedSection.createEl("summary", { text: `\u2705 Completed Goals (${completedGoals.length})` });
+      const completedList = completedSection.createEl("div", { cls: "lg-goals-list" });
+      for (const goal of completedGoals) {
+        await this.renderGoalCard(completedList, goal);
+      }
+    }
+  }
+  async renderGoalCard(parent, goal) {
+    const card = parent.createEl("div", { cls: `lg-goal-card ${goal.isCompleted ? "is-completed" : ""}` });
+    const isExpanded = this.expandedGoalId === goal.id;
+    const header = card.createEl("div", { cls: "lg-goal-header" });
+    header.createEl("div", { text: goal.title || goal.description, cls: "lg-goal-description" });
+    if (goal.title && goal.description) {
+      header.createEl("div", { text: goal.description, cls: "lg-goal-subdescription" });
+    }
+    const meta = header.createEl("div", { cls: "lg-goal-meta" });
+    meta.createEl("span", { text: `\u{1F4C5} ${goal.deadline}`, cls: "lg-goal-deadline" });
+    const goalFile = this.app.vault.getAbstractFileByPath(goal.filepath);
+    let progress = 0;
+    let goalTasks = [];
+    if (goalFile instanceof import_obsidian.TFile) {
+      const content = await this.app.vault.read(goalFile);
+      goalTasks = parseTasks(content, this.plugin.settings.stats, false);
+      const completedCount = goalTasks.filter((t) => t.completed).length;
+      if (goalTasks.length > 0) {
+        progress = completedCount / goalTasks.length * 100;
+      }
+      if (!goal.isCompleted && goalTasks.length > 0 && completedCount === goalTasks.length) {
+        goal.isCompleted = true;
+        await this.plugin.saveSettings();
+        new import_obsidian.Notice(`\u{1F389} Goal Achieved: ${goal.title || goal.description}!`);
+        await this.plugin.triggerAiAnalysis(`I just achieved my goal: "${goal.title || goal.description}"! I'm amazing!`);
+        this.update();
+        return;
+      }
+    }
+    const progressContainer = card.createEl("div", { cls: "lg-goal-progress-container" });
+    const progressBar = progressContainer.createEl("div", { cls: "lg-bar-container" });
+    const fill = progressBar.createEl("div", { cls: "lg-bar-fill" });
+    fill.style.width = `${progress}%`;
+    progressContainer.createEl("div", { text: `${Math.round(progress)}%`, cls: "lg-goal-progress-text" });
+    const actions = card.createEl("div", { cls: "lg-goal-actions" });
+    if (goalTasks.length === 0) {
+      const planBtn = actions.createEl("button", { text: `Let ${this.plugin.settings.ai.name} plan it for you`, cls: "lg-plan-btn" });
+      planBtn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        new import_obsidian.Notice(`${this.plugin.settings.ai.name} is drafting a plan...`);
+        await this.plugin.generateGoalPlan(goal);
+        this.update();
+      });
+    }
+    card.addEventListener("click", () => {
+      this.expandedGoalId = isExpanded ? null : goal.id;
+      this.update();
+    });
+    if (isExpanded && goalFile instanceof import_obsidian.TFile) {
+      const taskList = card.createEl("div", { cls: "lg-goal-tasks" });
+      goalTasks.forEach((task) => {
+        const item = taskList.createEl("div", { cls: `lg-quest-item ${task.completed ? "is-completed" : ""}` });
+        item.addEventListener("click", (e) => e.stopPropagation());
+        const checkbox = item.createEl("input", { type: "checkbox" });
+        checkbox.checked = task.completed;
+        checkbox.disabled = task.isProcessed;
+        checkbox.addEventListener("change", async () => {
+          await this.handleGoalTaskToggle(goal, task, checkbox.checked);
+        });
+        const textContainer = item.createEl("div", { cls: "lg-quest-text-container" });
+        textContainer.createEl("span", { text: task.text, cls: "lg-quest-title" });
+      });
+      const openFileBtn = actions.createEl("button", { text: "\u{1F4C2} Open Plan", cls: "lg-open-file-btn" });
+      openFileBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.app.workspace.getLeaf().openFile(goalFile);
+      });
+    }
+  }
+  async handleGoalTaskToggle(goal, task, completed) {
+    const file = this.app.vault.getAbstractFileByPath(goal.filepath);
+    if (!(file instanceof import_obsidian.TFile))
+      return;
+    this.plugin.isInternalChange = true;
+    try {
+      let rewardString = "";
+      if (completed) {
+        const now = /* @__PURE__ */ new Date();
+        const penaltyInfo = this.plugin.getPenaltyInfo(task, now);
+        const coins = this.plugin.applyReward(task, penaltyInfo);
+        rewardString = this.plugin.getRewardString(task, coins);
+        if (penaltyInfo.isLate) {
+          new import_obsidian.Notice(`\u26A0\uFE0F Goal Task Done (Late): ${task.text}`);
+          await this.plugin.triggerAiAnalysis(`I finished a sub-task for my goal "${goal.description}" late: "${task.text}". Rewards were reduced.`);
+        } else {
+          new import_obsidian.Notice(`\u2705 Goal Task Done: ${task.text}`);
+          await this.plugin.triggerAiAnalysis(`I finished a sub-task for my goal "${goal.description}": "${task.text}"!`);
+        }
+      } else {
+        this.plugin.applyUnreward(task);
+      }
+      const content = await this.app.vault.read(file);
+      const newContent = updateTaskInContent(content, task.originalLine, completed, completed, rewardString);
+      await this.app.vault.modify(file, newContent);
+      await this.plugin.saveSettings();
+      this.update();
+    } finally {
+      this.plugin.isInternalChange = false;
+    }
+  }
 };
 
 // src/ai.ts
 var import_obsidian2 = require("obsidian");
 var AIService = class {
-  static async generateResponse(settings, context) {
+  static async generateResponse(settings, systemPrompt, history, currentPrompt, maxTokens = 100) {
     const { provider, apiKey, model } = settings.ai;
     if (!apiKey)
       return "API Key is missing. Please check settings.";
     try {
       if (provider === "openai") {
-        return await this.callOpenAI(apiKey, model, context);
+        return await this.callOpenAI(apiKey, model, systemPrompt, history, currentPrompt, maxTokens);
       } else if (provider === "gemini") {
-        return await this.callGemini(apiKey, model, context);
+        return await this.callGemini(apiKey, model, systemPrompt, history, currentPrompt, maxTokens);
       } else if (provider === "openrouter") {
-        return await this.callOpenRouter(apiKey, model, context);
+        return await this.callOpenRouter(apiKey, model, systemPrompt, history, currentPrompt, maxTokens);
       }
       return "Unsupported provider.";
     } catch (e) {
@@ -757,7 +891,12 @@ var AIService = class {
       return `Error: ${e.message || "Failed to connect to AI"}`;
     }
   }
-  static async callOpenAI(apiKey, model, context) {
+  static async callOpenAI(apiKey, model, systemPrompt, history, currentPrompt, maxTokens) {
+    const messages = [
+      { role: "system", content: systemPrompt },
+      ...history,
+      { role: "user", content: currentPrompt }
+    ];
     const response = await (0, import_obsidian2.requestUrl)({
       url: "https://api.openai.com/v1/chat/completions",
       method: "POST",
@@ -767,27 +906,55 @@ var AIService = class {
       },
       body: JSON.stringify({
         model: model || "gpt-3.5-turbo",
-        messages: [{ role: "user", content: context }],
-        max_tokens: 50
+        messages,
+        max_tokens: maxTokens
       })
     });
     return response.json.choices[0].message.content;
   }
-  static async callGemini(apiKey, model, context) {
+  static async callGemini(apiKey, model, systemPrompt, history, currentPrompt, maxTokens) {
+    const contents = history.map((m) => ({
+      role: m.role === "assistant" ? "model" : "user",
+      parts: [{ text: m.content }]
+    }));
+    if (contents.length === 0) {
+      contents.push({
+        role: "user",
+        parts: [{ text: `${systemPrompt}
+
+${currentPrompt}` }]
+      });
+    } else {
+      const firstUserMsg = contents.find((c) => c.role === "user");
+      if (firstUserMsg) {
+        firstUserMsg.parts[0].text = `${systemPrompt}
+
+${firstUserMsg.parts[0].text}`;
+      }
+      contents.push({
+        role: "user",
+        parts: [{ text: currentPrompt }]
+      });
+    }
     const response = await (0, import_obsidian2.requestUrl)({
       url: `https://generativelanguage.googleapis.com/v1beta/models/${model || "gemini-pro"}:generateContent?key=${apiKey}`,
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: context }] }],
+        contents,
         generationConfig: {
-          maxOutputTokens: 50
+          maxOutputTokens: maxTokens
         }
       })
     });
     return response.json.candidates[0].content.parts[0].text;
   }
-  static async callOpenRouter(apiKey, model, context) {
+  static async callOpenRouter(apiKey, model, systemPrompt, history, currentPrompt, maxTokens) {
+    const messages = [
+      { role: "system", content: systemPrompt },
+      ...history,
+      { role: "user", content: currentPrompt }
+    ];
     const response = await (0, import_obsidian2.requestUrl)({
       url: "https://openrouter.ai/api/v1/chat/completions",
       method: "POST",
@@ -799,8 +966,8 @@ var AIService = class {
       },
       body: JSON.stringify({
         model: model || "openai/gpt-3.5-turbo",
-        messages: [{ role: "user", content: context }],
-        max_tokens: 50
+        messages,
+        max_tokens: maxTokens
       })
     });
     return response.json.choices[0].message.content;
@@ -850,6 +1017,18 @@ var LifeGaugePlugin = class extends import_obsidian3.Plugin {
           if (now - this.settings.lastAiTriggerTime >= intervalMs) {
             await this.triggerAiAnalysis("It's been a while! How are things going?");
           }
+          const activeGoals = this.settings.goals.filter((g) => !g.isCompleted);
+          for (const goal of activeGoals) {
+            const deadline = new Date(goal.deadline).getTime();
+            const diffMs = deadline - now;
+            const diffDays = diffMs / (1e3 * 60 * 60 * 24);
+            if (diffDays > 0 && diffDays <= 1) {
+              const hourSinceLastTrigger = (now - this.settings.lastAiTriggerTime) / (1e3 * 60 * 60);
+              if (hourSinceLastTrigger >= 1) {
+                await this.triggerAiAnalysis(`The deadline for my goal "${goal.description}" is very close (tomorrow)! I need to hurry up!`);
+              }
+            }
+          }
         }
         this.saveSettings();
       }, 60 * 1e3)
@@ -872,10 +1051,8 @@ var LifeGaugePlugin = class extends import_obsidian3.Plugin {
     task.rewards.forEach((reward) => {
       const stat = this.settings.stats.find((s) => s.id === reward.statId);
       if (stat) {
-        const { requiredXp } = calculateLevel(stat.currentXp, stat.baseXp, stat.xpIncrement);
         const baseXP = Math.floor(Math.random() * 15) + 1;
-        const bonusXP = (requiredXp - 100) / 10;
-        const finalReward = (baseXP + bonusXP) * finalMultiplier;
+        const finalReward = baseXP * finalMultiplier;
         stat.currentXp += finalReward;
         totalXpAwarded += finalReward;
         reward.earnedAmount = Math.round(finalReward * 10) / 10;
@@ -886,10 +1063,8 @@ var LifeGaugePlugin = class extends import_obsidian3.Plugin {
     task.skills.forEach((skillName) => {
       const skill = this.settings.skills.find((s) => s.name.toLowerCase() === skillName || s.id.toLowerCase() === skillName);
       if (skill) {
-        const { requiredXp } = calculateLevel(skill.currentXp, skill.baseXp, skill.xpIncrement);
         const baseXP = Math.floor(Math.random() * 15) + 1;
-        const bonusXP = (requiredXp - 100) / 10;
-        const finalReward = (baseXP + bonusXP) * finalMultiplier;
+        const finalReward = baseXP * finalMultiplier;
         skill.currentXp += finalReward;
         if (skill.currentXp < 0)
           skill.currentXp = 0;
@@ -1111,36 +1286,53 @@ You have reached a new title: ${newTitle.name}!`, 5e3);
     const title = getCurrentTitle(totalXp, this.settings.titles);
     const behaviorIdx = Math.floor(Math.random() * this.AI_BEHAVIORS.length);
     const currentBehavior = this.AI_BEHAVIORS[behaviorIdx];
+    const systemPrompt = `
+You are ${this.settings.ai.name}, a helpful and cheeky companion. Keep your response EXTREMELY SHORT (1-2 sentences, max 20 words).
+Rules:
+1. Speak as ${this.settings.ai.name}. Be brief (max 2 sentences).
+2. React to the user's current status and the trigger context.
+3. Blend the "Primary Behavioral Trait" with the "Personality Guidelines" below.
+4. Output ONLY the speech of the character.
+
+Personality Guidelines based on Stats:
+1. If "Strength" (STR) is high (Level 5+), be confident, bold, and energetic.
+2. If "Knowledge/Intelligence" (INT) is low (Level 1-2), be slightly confused, silly.
+3. If "Vitality" (VIT) is high, be overly healthy and enthusiastic.
+4. If "Dexterity" (DEX) is low, mention being clumsy.
+5. If Satiety is low, act hungry or weak regardless of other stats.
+`;
     const statsInfo = this.settings.stats.map((s) => {
       const { level, progress } = calculateLevel(s.currentXp, s.baseXp, s.xpIncrement);
       return `- ${s.name} (${s.id}): Level ${level} (${Math.floor(progress)}%)`;
     }).join("\n");
-    const context = `
-You are ${this.settings.ai.name}, a helpful and cheeky companion. Keep your response EXTREMELY SHORT (1-2 sentences, max 20 words).
+    const userPrompt = `
+[CONTEXT UPDATE]
 Current Status:
 - Satiety (Hunger): ${Math.floor(this.settings.hunger)}/${this.settings.maxHunger}
 - Current Rank: ${title.name}
 - Total Coins: ${this.settings.coins}
-- Trigger Context: ${triggerPrompt}
-- Primary Behavioral Trait for this response: ${currentBehavior}
+- Trigger: ${triggerPrompt}
+- Current Mood Trait: ${currentBehavior}
 
 Current Player Stats:
 ${statsInfo}
-
-Personality Guidelines based on Stats:
-1. If "Strength" (STR) is high (Level 5+), be confident, bold, and energetic.
-2. If "Knowledge/Intelligence" (INT) is low (Level 1-2), be slightly confused, silly, or include a "goofy action" or a "dumb mistake" in your speech.
-3. If "Vitality" (VIT) is high, be overly healthy and enthusiastic about physical well-being.
-4. If "Dexterity" (DEX) is low, mention being clumsy or dropping something.
-5. If Satiety is low, act hungry or weak regardless of other stats.
-
-Rules:
-1. Speak as ${this.settings.ai.name}. Be brief (max 2 sentences).
-2. Based on the rules above, react to the user current status and the trigger context.
-3. Blend the "Primary Behavioral Trait" with the "Personality Guidelines" above.
-4. Output ONLY the speech of the character.
 `;
-    const response = await AIService.generateResponse(this.settings, context);
+    const response = await AIService.generateResponse(
+      this.settings,
+      systemPrompt,
+      this.settings.ai.chatHistory || [],
+      userPrompt,
+      100
+    );
+    if (!this.settings.ai.chatHistory)
+      this.settings.ai.chatHistory = [];
+    const historyEntry = `Action: ${triggerPrompt} (Satiety: ${Math.floor(this.settings.hunger)})`;
+    this.settings.ai.chatHistory.push({ role: "user", content: historyEntry });
+    this.settings.ai.chatHistory.push({ role: "assistant", content: response });
+    const maxLen = this.settings.ai.maxHistoryLength || 10;
+    if (this.settings.ai.chatHistory.length > maxLen * 2) {
+      this.settings.ai.chatHistory = this.settings.ai.chatHistory.slice(-maxLen * 2);
+    }
     this.settings.lastAiResponse = response;
     this.settings.ai.newResponse = true;
     this.settings.lastAiTriggerTime = Date.now();
@@ -1176,53 +1368,91 @@ Rules:
       }
     });
   }
-  showAddRewardModal() {
-    new AddRewardModal(this.app, this).open();
+  showAddGoalModal() {
+    new AddGoalModal(this.app, this).open();
+  }
+  async generateGoalPlan(goal) {
+    if (!this.settings.ai.enabled || !this.settings.ai.apiKey) {
+      new import_obsidian3.Notice("AI Companion is not configured. Please enable it in settings.");
+      return;
+    }
+    const systemPrompt = `You are ${this.settings.ai.name}, an expert life planner. Create a detailed, structured plan (TODO list) for the user's goal.
+Output ONLY the markdown tasks, nothing else. Format: - [ ] Task description (Stat1, Stat2) @{YYYY-MM-DD}
+Stats available: ${this.settings.stats.map((s) => s.name).join(", ")}.
+Assign a deadline for each task based on the final goal deadline: ${goal.deadline}.
+Keep it realistic and actionable.`;
+    const userPrompt = `Goal: ${goal.description}
+Deadline: ${goal.deadline}`;
+    const response = await AIService.generateResponse(this.settings, systemPrompt, [], userPrompt, 2e3);
+    const file = this.app.vault.getAbstractFileByPath(goal.filepath);
+    if (file instanceof import_obsidian3.TFile) {
+      const currentContent = await this.app.vault.read(file);
+      const newContent = currentContent + "\n\n## AI Drafted Plan\n" + response;
+      await this.app.vault.modify(file, newContent);
+      new import_obsidian3.Notice(`${this.settings.ai.name} has created a plan for you!`);
+    }
   }
 };
-var AddRewardModal = class extends import_obsidian3.Modal {
+var AddGoalModal = class extends import_obsidian3.Modal {
   constructor(app, plugin) {
     super(app);
     __publicField(this, "plugin");
-    __publicField(this, "name", "New Reward");
-    __publicField(this, "icon", "\u{1F381}");
+    __publicField(this, "title", "");
     __publicField(this, "description", "");
-    __publicField(this, "cost", 50);
+    __publicField(this, "deadline", formatDate(/* @__PURE__ */ new Date()));
     this.plugin = plugin;
   }
   onOpen() {
     const { contentEl } = this;
-    contentEl.createEl("h2", { text: "Add Custom Reward" });
-    new import_obsidian3.Setting(contentEl).setName("Reward Name").addText(
-      (text) => text.setValue(this.name).onChange((value) => {
-        this.name = value;
+    contentEl.createEl("h2", { text: "Set a New Goal" });
+    new import_obsidian3.Setting(contentEl).setName("Goal Title").setDesc("A short name for your goal").addText(
+      (text) => text.setValue(this.title).onChange((value) => {
+        this.title = value;
       })
     );
-    new import_obsidian3.Setting(contentEl).setName("Icon").addText(
-      (text) => text.setValue(this.icon).onChange((value) => {
-        this.icon = value || "\u{1F381}";
-      })
-    );
-    new import_obsidian3.Setting(contentEl).setName("Description").addText(
+    new import_obsidian3.Setting(contentEl).setName("Description").setDesc("More details about what you want to achieve").addTextArea(
       (text) => text.setValue(this.description).onChange((value) => {
         this.description = value;
       })
     );
-    new import_obsidian3.Setting(contentEl).setName("Cost (Coins)").addText(
-      (text) => text.setValue(this.cost.toString()).onChange((value) => {
-        const val = parseInt(value);
-        if (!isNaN(val))
-          this.cost = val;
-      })
-    );
+    new import_obsidian3.Setting(contentEl).setName("Deadline").addText((text) => {
+      text.inputEl.type = "date";
+      text.setValue(this.deadline).onChange((value) => {
+        this.deadline = value;
+      });
+    });
     new import_obsidian3.Setting(contentEl).addButton(
-      (btn) => btn.setButtonText("Add to Shop").setCta().onClick(async () => {
-        this.plugin.settings.customShopItems.push({
-          id: `item-${Date.now()}`,
-          name: this.name,
-          icon: this.icon,
+      (btn) => btn.setButtonText("Confirm Goal").setCta().onClick(async () => {
+        if (!this.title) {
+          new import_obsidian3.Notice("Please enter a goal title.");
+          return;
+        }
+        const goalId = `goal-${Date.now()}`;
+        const folderPath = "Goals";
+        if (!await this.app.vault.adapter.exists(folderPath)) {
+          await this.app.vault.createFolder(folderPath);
+        }
+        const fileName = `${this.title.replace(/[\\/:*?"<>|]/g, "")}.md`;
+        const filepath = (0, import_obsidian3.normalizePath)(`${folderPath}/${fileName}`);
+        if (await this.app.vault.adapter.exists(filepath)) {
+          new import_obsidian3.Notice("A goal with this name already exists.");
+          return;
+        }
+        const template = `# Goal: ${this.title}
+Description: ${this.description}
+Deadline: ${this.deadline}
+
+## Tasks
+`;
+        await this.app.vault.create(filepath, template);
+        this.plugin.settings.goals.push({
+          id: goalId,
+          title: this.title,
           description: this.description,
-          cost: this.cost
+          deadline: this.deadline,
+          filepath,
+          createdAt: Date.now(),
+          isCompleted: false
         });
         await this.plugin.saveSettings();
         this.close();

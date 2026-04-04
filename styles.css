@@ -197,6 +197,13 @@
     font-weight: 600;
 }
 
+.lg-goal-subdescription {
+    font-size: 0.9em;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-top: 4px;
+}
+
 /* Shop UI */
 .lg-shop-container {
     animation: fadeIn 0.3s ease-out;
@@ -710,3 +717,111 @@
 }
 
 
+.lg-goals-container {
+    animation: fadeIn 0.3s ease-out;
+}
+
+.lg-goals-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.lg-add-goal-btn {
+    background-color: var(--interactive-accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 6px 12px;
+    cursor: pointer;
+    font-weight: 600;
+}
+
+.lg-goals-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.lg-goal-card {
+    background: var(--background-secondary);
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 12px;
+    padding: 16px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.lg-goal-card:hover {
+    border-color: var(--interactive-accent);
+    background: var(--background-secondary-alt);
+}
+
+.lg-goal-card.is-completed {
+    opacity: 0.7;
+    border-color: var(--background-modifier-success);
+}
+
+.lg-goal-header {
+    margin-bottom: 12px;
+}
+
+.lg-goal-description {
+    font-size: 1.1em;
+    font-weight: bold;
+    color: var(--text-normal);
+}
+
+.lg-goal-meta {
+    font-size: 0.85em;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.lg-goal-progress-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.lg-goal-progress-text {
+    font-size: 0.85em;
+    font-weight: bold;
+    color: var(--text-accent);
+    min-width: 35px;
+}
+
+.lg-goal-actions {
+    margin-top: 12px;
+    display: flex;
+    gap: 8px;
+}
+
+.lg-plan-btn, .lg-open-file-btn {
+    font-size: 0.8em;
+    padding: 4px 8px;
+}
+
+.lg-goal-tasks {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--background-modifier-border);
+    background: var(--background-primary);
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.lg-completed-goals-details {
+    margin-top: 30px;
+    border-top: 2px dashed var(--background-modifier-border);
+    padding-top: 10px;
+}
+
+.lg-completed-goals-details summary {
+    cursor: pointer;
+    font-size: 1.1em;
+    font-weight: bold;
+    color: var(--text-success);
+    margin-bottom: 10px;
+}

@@ -1,5 +1,5 @@
 import { ItemView, WorkspaceLeaf, TFile, normalizePath, Notice } from 'obsidian';
-import { Stat, Title, getTotalXp, getCurrentTitle, getNextTitle, calculateLevel, getRequiredXp, formatDate } from './data';
+import { Stat, Title, getTotalXp, getCurrentTitle, getNextTitle, calculateLevel, getRequiredXp, formatDate, Goal } from './data';
 import { parseTasks, updateTaskInContent, LifeGaugeTask, getTaskKey } from './parser';
 import LifeGaugePlugin from '../main';
 
@@ -9,7 +9,8 @@ export class LifeGaugeView extends ItemView {
     plugin: LifeGaugePlugin;
     tasks: LifeGaugeTask[] = [];
     isUpdating = false;
-    activeTab: 'main' | 'shop' | 'stats' = 'main';
+    activeTab: 'main' | 'shop' | 'stats' | 'goals' = 'main';
+    expandedGoalId: string | null = null;
 
     constructor(leaf: WorkspaceLeaf, plugin: LifeGaugePlugin) {
         super(leaf);
@@ -59,6 +60,8 @@ export class LifeGaugeView extends ItemView {
                 this.renderShop(contentEl);
             } else if (this.activeTab === 'stats') {
                 this.renderStatsTab(contentEl);
+            } else if (this.activeTab === 'goals') {
+                this.renderGoalsTab(contentEl);
             } else {
                 // Main / Dashboard tab
                 this.renderStats(contentEl);
@@ -111,7 +114,8 @@ export class LifeGaugeView extends ItemView {
         const tabs: {id: typeof LifeGaugeView.prototype.activeTab, name: string, icon: string}[] = [
             { id: 'main', name: 'Dashboard', icon: '🏠' },
             { id: 'shop', name: 'Shop', icon: '🏪' },
-            { id: 'stats', name: 'Stats', icon: '📊' }
+            { id: 'stats', name: 'Stats', icon: '📊' },
+            { id: 'goals', name: 'Goals', icon: '🎯' }
         ];
 
         tabs.forEach(t => {
@@ -587,5 +591,159 @@ export class LifeGaugeView extends ItemView {
         }
 
         // Removed redundant this.update() call as saveSettings() triggers it.
+    }
+
+    async renderGoalsTab(parent: HTMLElement) {
+        const container = parent.createEl('div', { cls: 'lg-goals-container' });
+        
+        const header = container.createEl('div', { cls: 'lg-goals-header' });
+        header.createEl('h3', { text: '🎯 Active Goals', cls: 'lg-section-title' });
+        
+        const addGoalBtn = header.createEl('button', { text: '➕ Set Goal', cls: 'lg-add-goal-btn' });
+        addGoalBtn.addEventListener('click', () => {
+            (this.plugin as any).showAddGoalModal();
+        });
+
+        const activeGoals = this.plugin.settings.goals.filter(g => !g.isCompleted);
+        const completedGoals = this.plugin.settings.goals.filter(g => g.isCompleted);
+
+        if (activeGoals.length === 0) {
+            container.createEl('div', { text: 'No active goals. Set one to start your journey!', cls: 'lg-no-items' });
+        } else {
+            const goalsList = container.createEl('div', { cls: 'lg-goals-list' });
+            for (const goal of activeGoals) {
+                await this.renderGoalCard(goalsList, goal);
+            }
+        }
+
+        if (completedGoals.length > 0) {
+            const completedSection = container.createEl('details', { cls: 'lg-completed-goals-details' });
+            const summary = completedSection.createEl('summary', { text: `✅ Completed Goals (${completedGoals.length})` });
+            const completedList = completedSection.createEl('div', { cls: 'lg-goals-list' });
+            for (const goal of completedGoals) {
+                await this.renderGoalCard(completedList, goal);
+            }
+        }
+    }
+
+    async renderGoalCard(parent: HTMLElement, goal: Goal) {
+        const card = parent.createEl('div', { cls: `lg-goal-card ${goal.isCompleted ? 'is-completed' : ''}` });
+        const isExpanded = this.expandedGoalId === goal.id;
+
+        const header = card.createEl('div', { cls: 'lg-goal-header' });
+        header.createEl('div', { text: goal.title || goal.description, cls: 'lg-goal-description' });
+        if (goal.title && goal.description) {
+            header.createEl('div', { text: goal.description, cls: 'lg-goal-subdescription' });
+        }
+        
+        const meta = header.createEl('div', { cls: 'lg-goal-meta' });
+        meta.createEl('span', { text: `📅 ${goal.deadline}`, cls: 'lg-goal-deadline' });
+
+        // Calculate progress
+        const goalFile = this.app.vault.getAbstractFileByPath(goal.filepath);
+        let progress = 0;
+        let goalTasks: LifeGaugeTask[] = [];
+        
+        if (goalFile instanceof TFile) {
+            const content = await this.app.vault.read(goalFile);
+            goalTasks = parseTasks(content, this.plugin.settings.stats, false);
+            const completedCount = goalTasks.filter(t => t.completed).length;
+            if (goalTasks.length > 0) {
+                progress = (completedCount / goalTasks.length) * 100;
+            }
+
+            // Check if goal just finished
+            if (!goal.isCompleted && goalTasks.length > 0 && completedCount === goalTasks.length) {
+                goal.isCompleted = true;
+                await this.plugin.saveSettings();
+                new Notice(`🎉 Goal Achieved: ${goal.title || goal.description}!`);
+                await this.plugin.triggerAiAnalysis(`I just achieved my goal: "${goal.title || goal.description}"! I'm amazing!`);
+                this.update();
+                return;
+            }
+        }
+
+        const progressContainer = card.createEl('div', { cls: 'lg-goal-progress-container' });
+        const progressBar = progressContainer.createEl('div', { cls: 'lg-bar-container' });
+        const fill = progressBar.createEl('div', { cls: 'lg-bar-fill' });
+        fill.style.width = `${progress}%`;
+        progressContainer.createEl('div', { text: `${Math.round(progress)}%`, cls: 'lg-goal-progress-text' });
+
+        const actions = card.createEl('div', { cls: 'lg-goal-actions' });
+        
+        if (goalTasks.length === 0) {
+            const planBtn = actions.createEl('button', { text: `Let ${this.plugin.settings.ai.name} plan it for you`, cls: 'lg-plan-btn' });
+            planBtn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                new Notice(`${this.plugin.settings.ai.name} is drafting a plan...`);
+                await (this.plugin as any).generateGoalPlan(goal);
+                this.update();
+            });
+        }
+
+        card.addEventListener('click', () => {
+            this.expandedGoalId = isExpanded ? null : goal.id;
+            this.update();
+        });
+
+        if (isExpanded && goalFile instanceof TFile) {
+            const taskList = card.createEl('div', { cls: 'lg-goal-tasks' });
+            goalTasks.forEach(task => {
+                const item = taskList.createEl('div', { cls: `lg-quest-item ${task.completed ? 'is-completed' : ''}` });
+                item.addEventListener('click', (e) => e.stopPropagation());
+
+                const checkbox = item.createEl('input', { type: 'checkbox' }) as HTMLInputElement;
+                checkbox.checked = task.completed;
+                checkbox.disabled = task.isProcessed;
+                
+                checkbox.addEventListener('change', async () => {
+                    await this.handleGoalTaskToggle(goal, task, checkbox.checked);
+                });
+
+                const textContainer = item.createEl('div', { cls: 'lg-quest-text-container' });
+                textContainer.createEl('span', { text: task.text, cls: 'lg-quest-title' });
+            });
+            
+            const openFileBtn = actions.createEl('button', { text: '📂 Open Plan', cls: 'lg-open-file-btn' });
+            openFileBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.app.workspace.getLeaf().openFile(goalFile);
+            });
+        }
+    }
+
+    async handleGoalTaskToggle(goal: Goal, task: LifeGaugeTask, completed: boolean) {
+        const file = this.app.vault.getAbstractFileByPath(goal.filepath);
+        if (!(file instanceof TFile)) return;
+
+        this.plugin.isInternalChange = true;
+        try {
+            let rewardString = "";
+            if (completed) {
+                const now = new Date();
+                const penaltyInfo = this.plugin.getPenaltyInfo(task, now);
+                const coins = this.plugin.applyReward(task, penaltyInfo);
+                rewardString = this.plugin.getRewardString(task, coins);
+                
+                if (penaltyInfo.isLate) {
+                    new Notice(`⚠️ Goal Task Done (Late): ${task.text}`);
+                    await this.plugin.triggerAiAnalysis(`I finished a sub-task for my goal "${goal.description}" late: "${task.text}". Rewards were reduced.`);
+                } else {
+                    new Notice(`✅ Goal Task Done: ${task.text}`);
+                    await this.plugin.triggerAiAnalysis(`I finished a sub-task for my goal "${goal.description}": "${task.text}"!`);
+                }
+            } else {
+                this.plugin.applyUnreward(task);
+            }
+
+            const content = await this.app.vault.read(file);
+            const newContent = updateTaskInContent(content, task.originalLine, completed, completed, rewardString);
+            await this.app.vault.modify(file, newContent);
+            
+            await this.plugin.saveSettings();
+            this.update();
+        } finally {
+            this.plugin.isInternalChange = false;
+        }
     }
 }
