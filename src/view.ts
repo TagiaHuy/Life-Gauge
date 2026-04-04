@@ -9,8 +9,17 @@ export class LifeGaugeView extends ItemView {
     plugin: LifeGaugePlugin;
     tasks: LifeGaugeTask[] = [];
     isUpdating = false;
-    activeTab: 'main' | 'shop' | 'stats' | 'goals' = 'main';
+    activeTab: 'main' | 'shop' | 'stats' | 'goals' | 'chat' = 'main';
+    renderedTab: string | null = null;
     expandedGoalId: string | null = null;
+
+    // UI Element References for Partial Updates
+    coinTextEl?: HTMLElement;
+    satietyBarEl?: HTMLElement;
+    satietyValueEl?: HTMLElement;
+    aiDescEl?: HTMLElement;
+    aiNameEl?: HTMLElement;
+    chatHistoryEl?: HTMLElement;
 
     constructor(leaf: WorkspaceLeaf, plugin: LifeGaugePlugin) {
         super(leaf);
@@ -38,42 +47,107 @@ export class LifeGaugeView extends ItemView {
         this.isUpdating = true;
 
         try {
-            // 1. Prepare data (async)
             await this.loadTasks();
 
-            // Filter out archived tasks for the main display
-            const visibleTasks = this.tasks.filter(t => !t.isArchived);
-
-            const totalXp = getTotalXp(this.plugin.settings.stats);
-            const title = getCurrentTitle(totalXp, this.plugin.settings.titles);
-            const nextTitle = getNextTitle(totalXp, this.plugin.settings.titles);
-
-            // 2. Render (sync) - Clear only right before rendering
             const { contentEl } = this;
-            contentEl.empty();
-            contentEl.addClass('life-gauge-dashboard');
+            
+            // If tab changed or first render, do a full re-render
+            if (this.renderedTab !== this.activeTab || contentEl.childElementCount === 0) {
+                contentEl.empty();
+                contentEl.addClass('life-gauge-dashboard');
+                this.renderedTab = this.activeTab;
 
-            this.renderHeader(contentEl, title, nextTitle, totalXp);
+                const totalXp = getTotalXp(this.plugin.settings.stats);
+                const title = getCurrentTitle(totalXp, this.plugin.settings.titles);
+                const nextTitle = getNextTitle(totalXp, this.plugin.settings.titles);
 
-            // Tab rendering
-            if (this.activeTab === 'shop') {
-                this.renderShop(contentEl);
-            } else if (this.activeTab === 'stats') {
-                this.renderStatsTab(contentEl);
-            } else if (this.activeTab === 'goals') {
-                this.renderGoalsTab(contentEl);
-            } else {
-                // Main / Dashboard tab
-                this.renderStats(contentEl);
-                if (this.plugin.settings.skills.length > 0) {
-                    this.renderSkills(contentEl);
+                this.renderHeader(contentEl, title, nextTitle, totalXp);
+
+                if (this.activeTab === 'shop') {
+                    this.renderShop(contentEl);
+                } else if (this.activeTab === 'stats') {
+                    this.renderStatsTab(contentEl);
+                } else if (this.activeTab === 'goals') {
+                    this.renderGoalsTab(contentEl);
+                } else if (this.activeTab === 'chat') {
+                    this.renderChatTab(contentEl);
+                } else {
+                    // Filter out archived tasks for the main display
+                    const visibleTasks = this.tasks.filter(t => !t.isArchived);
+                    this.renderStats(contentEl);
+                    if (this.plugin.settings.skills.length > 0) {
+                        this.renderSkills(contentEl);
+                    }
+                    this.renderQuests(contentEl, visibleTasks);
                 }
-                this.renderQuests(contentEl, visibleTasks);
+            } else {
+                // Partial update of dynamic content (Header)
+                this.updateDynamicContent();
+
+                // If on main tab, we might need to refresh stats/quests if they changed
+                if (this.activeTab === 'main') {
+                    // We'll clear ONLY the content below the header
+                    // Find the elements after the header
+                    const header = contentEl.querySelector('.lg-header');
+                    if (header) {
+                        // Remove everything AFTER the header
+                        let next = header.nextElementSibling;
+                        while (next) {
+                            const toRemove = next;
+                            next = next.nextElementSibling;
+                            toRemove.remove();
+                        }
+                        // Re-render only the main content
+                        const visibleTasks = this.tasks.filter(t => !t.isArchived);
+                        this.renderStats(contentEl);
+                        if (this.plugin.settings.skills.length > 0) {
+                            this.renderSkills(contentEl);
+                        }
+                        this.renderQuests(contentEl, visibleTasks);
+                    }
+                } else if (this.activeTab === 'chat') {
+                    this.refreshChatHistory();
+                }
             }
         } catch (e) {
             console.error('Life Gauge: Update failed', e);
         } finally {
             this.isUpdating = false;
+        }
+    }
+
+    updateDynamicContent() {
+        const totalXp = getTotalXp(this.plugin.settings.stats);
+        const title = getCurrentTitle(totalXp, this.plugin.settings.titles);
+        
+        // 1. Update Coins
+        if (this.coinTextEl) {
+            this.coinTextEl.textContent = `💰 ${Math.floor(this.plugin.settings.coins)}`;
+        }
+
+        // 2. Update Satiety
+        if (this.satietyBarEl && this.satietyValueEl) {
+            const hunger = this.plugin.settings.hunger;
+            const maxHunger = this.plugin.settings.maxHunger;
+            const percent = (hunger / maxHunger) * 100;
+            
+            this.satietyBarEl.style.width = `${Math.min(100, percent)}%`;
+            if (percent >= 70) this.satietyBarEl.style.backgroundColor = '#4dff88';
+            else if (percent >= 30) this.satietyBarEl.style.backgroundColor = '#ffcc00';
+            else this.satietyBarEl.style.backgroundColor = '#ff4d4d';
+            
+            this.satietyValueEl.textContent = `${Math.floor(hunger)} / ${maxHunger}`;
+        }
+
+        // 3. Update AI Mascot Info
+        if (this.aiNameEl && this.aiDescEl) {
+            if (this.plugin.settings.ai.enabled) {
+                this.aiNameEl.textContent = this.plugin.settings.ai.name.toUpperCase();
+                this.aiDescEl.textContent = this.plugin.settings.lastAiResponse;
+            } else {
+                this.aiNameEl.textContent = `${title.icon} ${title.name.toUpperCase()} ${title.icon}`;
+                this.aiDescEl.textContent = title.description;
+            }
         }
     }
 
@@ -99,7 +173,7 @@ export class LifeGaugeView extends ItemView {
         // Coins & Settings
         const coinsSettingsGroup = topBar.createEl('div', { cls: 'lg-coins-shop-group' });
         const coinContainer = coinsSettingsGroup.createEl('div', { cls: 'lg-coin-container' });
-        coinContainer.createEl('span', { text: `💰 ${Math.floor(this.plugin.settings.coins)}`, cls: 'lg-coin-text' });
+        this.coinTextEl = coinContainer.createEl('span', { text: `💰 ${Math.floor(this.plugin.settings.coins)}`, cls: 'lg-coin-text' });
 
         // Settings icon
         const settingsIcon = coinsSettingsGroup.createEl('div', { cls: 'lg-settings-icon', text: '⚙️' });
@@ -108,24 +182,28 @@ export class LifeGaugeView extends ItemView {
             (this.app as any).setting.openTabById(this.plugin.manifest.id);
         });
 
-        // --- Tab Navigation ---
+        // --- Tab Navigation (Dropdown) ---
         const tabNav = header.createEl('div', { cls: 'lg-tab-nav' });
+        const dropdown = tabNav.createEl('select', { cls: 'lg-tab-dropdown' });
         
         const tabs: {id: typeof LifeGaugeView.prototype.activeTab, name: string, icon: string}[] = [
             { id: 'main', name: 'Dashboard', icon: '🏠' },
             { id: 'shop', name: 'Shop', icon: '🏪' },
             { id: 'stats', name: 'Stats', icon: '📊' },
-            { id: 'goals', name: 'Goals', icon: '🎯' }
+            { id: 'goals', name: 'Goals', icon: '🎯' },
+            { id: 'chat', name: `Chat with ${this.plugin.settings.ai.name}`, icon: '💬' }
         ];
 
         tabs.forEach(t => {
-            const tabBtn = tabNav.createEl('button', { cls: `lg-tab-btn ${this.activeTab === t.id ? 'is-active' : ''}` });
-            tabBtn.createEl('span', { text: t.icon, cls: 'lg-tab-icon' });
-            tabBtn.createEl('span', { text: t.name, cls: 'lg-tab-name' });
-            tabBtn.addEventListener('click', () => {
-                this.activeTab = t.id;
-                this.update();
-            });
+            const option = dropdown.createEl('option', { value: t.id, text: `${t.icon} ${t.name}` });
+            if (this.activeTab === t.id) {
+                option.selected = true;
+            }
+        });
+
+        dropdown.addEventListener('change', () => {
+            this.activeTab = dropdown.value as any;
+            this.update();
         });
 
         // --- Main Info (Avatar + Nickname) ---
@@ -161,15 +239,13 @@ export class LifeGaugeView extends ItemView {
             displayDesc = this.plugin.settings.lastAiResponse;
         }
 
-        info.createEl('div', { cls: 'lg-nickname', text: displayName });
-        const descEl = info.createEl('div', { cls: 'lg-description' });
-        
+        this.aiNameEl = info.createEl('div', { cls: 'lg-nickname', text: displayName });
+        this.aiDescEl = info.createEl('div', { cls: 'lg-description' });
+        this.aiDescEl.textContent = displayDesc;
+
         if (this.plugin.settings.ai.enabled && this.plugin.settings.ai.newResponse) {
-            this.runTypewriter(descEl, displayDesc);
             this.plugin.settings.ai.newResponse = false;
             this.plugin.saveSettings();
-        } else {
-            descEl.textContent = displayDesc;
         }
         if (this.plugin.settings.ai.enabled) {
             return; // Skip rank info if AI is enabled
@@ -183,13 +259,6 @@ export class LifeGaugeView extends ItemView {
         }
     }
 
-    private async runTypewriter(el: HTMLElement, text: string, speed: number = 25) {
-        el.textContent = "";
-        for (let i = 0; i < text.length; i++) {
-            el.textContent += text.charAt(i);
-            await new Promise(resolve => setTimeout(resolve, speed));
-        }
-    }
 
     renderSatiety(parent: HTMLElement) {
         const hunger = this.plugin.settings.hunger;
@@ -200,19 +269,19 @@ export class LifeGaugeView extends ItemView {
         container.createEl('div', { text: '🍖 Satiety', cls: 'lg-satiety-label' });
 
         const barContainer = container.createEl('div', { cls: 'lg-bar-container satiety' });
-        const bar = barContainer.createEl('div', { cls: 'lg-bar-fill' });
-        bar.style.width = `${Math.min(100, percent)}%`;
+        this.satietyBarEl = barContainer.createEl('div', { cls: 'lg-bar-fill' });
+        this.satietyBarEl.style.width = `${Math.min(100, percent)}%`;
         
         // Color coding
         if (percent >= 70) {
-            bar.style.backgroundColor = '#4dff88'; // Green
+            this.satietyBarEl.style.backgroundColor = '#4dff88'; // Green
         } else if (percent >= 30) {
-            bar.style.backgroundColor = '#ffcc00'; // Yellow
+            this.satietyBarEl.style.backgroundColor = '#ffcc00'; // Yellow
         } else {
-            bar.style.backgroundColor = '#ff4d4d'; // Red
+            this.satietyBarEl.style.backgroundColor = '#ff4d4d'; // Red
         }
 
-        container.createEl('div', { text: `${Math.floor(hunger)} / ${maxHunger}`, cls: 'lg-satiety-value' });
+        this.satietyValueEl = container.createEl('div', { text: `${Math.floor(hunger)} / ${maxHunger}`, cls: 'lg-satiety-value' });
     }
 
     purchasedItemIds = new Set<string>();
@@ -745,5 +814,72 @@ export class LifeGaugeView extends ItemView {
         } finally {
             this.plugin.isInternalChange = false;
         }
+    }
+
+    renderChatTab(parent: HTMLElement) {
+        const chatContainer = parent.createEl('div', { cls: 'lg-chat-container' });
+        chatContainer.createEl('h3', { text: `💬 Chat with ${this.plugin.settings.ai.name}`, cls: 'lg-section-title' });
+
+        this.chatHistoryEl = chatContainer.createEl('div', { cls: 'lg-chat-history' });
+        this.refreshChatHistory();
+
+        const inputContainer = chatContainer.createEl('div', { cls: 'lg-chat-input-container' });
+        const input = inputContainer.createEl('input', { 
+            type: 'text', 
+            placeholder: 'Type your message...', 
+            cls: 'lg-chat-input' 
+        }) as HTMLInputElement;
+
+        const sendBtn = inputContainer.createEl('button', { text: 'Send', cls: 'lg-chat-send-btn' });
+
+        const handleSend = async () => {
+            const message = input.value.trim();
+            if (!message) return;
+
+            input.value = "";
+            input.disabled = true;
+            sendBtn.disabled = true;
+
+            try {
+                // Optimistic update
+                if (this.chatHistoryEl) {
+                    const userMsgEl = this.chatHistoryEl.createEl('div', { cls: 'lg-chat-msg user' });
+                    userMsgEl.createEl('div', { text: message, cls: 'lg-chat-msg-content' });
+                    this.chatHistoryEl.scrollTop = this.chatHistoryEl.scrollHeight;
+                }
+
+                await (this.plugin as any).chatWithAi(message);
+                
+                // Refresh the whole view to show the new response
+                await this.update();
+            } finally {
+                input.disabled = false;
+                sendBtn.disabled = false;
+                input.focus();
+            }
+        };
+
+        input.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') handleSend();
+        });
+        sendBtn.addEventListener('click', handleSend);
+    }
+
+    refreshChatHistory() {
+        if (!this.chatHistoryEl) return;
+        
+        this.chatHistoryEl.empty();
+        const history = this.plugin.settings.ai.chatHistory || [];
+        history.forEach(msg => {
+            const msgEl = this.chatHistoryEl!.createEl('div', { cls: `lg-chat-msg ${msg.role}` });
+            msgEl.createEl('div', { text: msg.content, cls: 'lg-chat-msg-content' });
+        });
+
+        // Scroll to bottom
+        setTimeout(() => {
+            if (this.chatHistoryEl) {
+                this.chatHistoryEl.scrollTop = this.chatHistoryEl.scrollHeight;
+            }
+        }, 100);
     }
 }

@@ -357,18 +357,14 @@ export default class LifeGaugePlugin extends Plugin {
         return { multiplier, isLate: true, minutesLate };
     }
 
-    private AI_BEHAVIORS = [
-        "Review: Thorough analysis of my productivity.",
-        "Compare: Compare me to yesterday or goals.",
-        "Complain: Complain about me neglecting my duties or letting the food run out.",
-        "Sadness: Feeling disappointed if I underperform.",
-        "Encouragement: Inspire and motivate strongly.",
-        "Crazy: Humorously teasing about my habits.",
-        "Anxious: Shows anxiety if I have a lot of overdue tasks.",
-        "Excited: Shout with excitement when I achieve new achievements.",
-        "Philosophy: Deep reflections on discipline and life.",
-        "Curious: Ask about what I'm working on."
-    ];
+    private DICE_BEHAVIORS: { [key: number]: string } = {
+        1: "Focus on User: Ask about their day, feelings, or recent life events.",
+        2: "Storyteller/Creative: Tell a very short story, a joke, a fun fact, or something imaginative.",
+        3: "Cheeky/Sarcastic: Use friendly sarcasm, tease the user about their stats or hunger.",
+        4: "Goal-Oriented: Actively discuss their long-term goals or suggest a new challenge.",
+        5: "Philosophical: Share a deep reflection or ask a thought-provoking question about discipline.",
+        6: "Empathetic: Check-in on the user's mental well-being and offer supportive words."
+    };
 
     async triggerAiAnalysis(triggerPrompt: string) {
         if (!this.settings.ai.enabled || !this.settings.ai.apiKey) return;
@@ -376,17 +372,32 @@ export default class LifeGaugePlugin extends Plugin {
         const totalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
         const title = getCurrentTitle(totalXp, this.settings.titles);
 
-        const behaviorIdx = Math.floor(Math.random() * this.AI_BEHAVIORS.length);
-        const currentBehavior = this.AI_BEHAVIORS[behaviorIdx];
+        // 1. Roll the Dice
+        const diceRoll = Math.floor(Math.random() * 6) + 1;
+        const currentBehavior = this.DICE_BEHAVIORS[diceRoll];
 
-        // 1. Build System Prompt (Who I am and Rules)
+        // 2. Build System Prompt (Who I am and Rules)
+        let summaryContext = "";
+        if (this.settings.ai.chatSummary) {
+            summaryContext = `\nConversation Summary: ${this.settings.ai.chatSummary}\n`;
+        }
+
+        let knowledgeContext = "";
+        if (this.settings.ai.userKnowledge && Object.keys(this.settings.ai.userKnowledge).length > 0) {
+            knowledgeContext = `\nUser Knowledge (Long-term Memory):\n${Object.entries(this.settings.ai.userKnowledge).map(([k, v]) => `- ${k}: ${v}`).join('\n')}\n`;
+        }
+
         const systemPrompt = `
-You are ${this.settings.ai.name}, a helpful and cheeky companion. Keep your response EXTREMELY SHORT (1-2 sentences, max 20 words).
+You are ${this.settings.ai.name}, a helpful and cheeky companion. Keep your response EXTREMELY SHORT (1-2 sentences, max 20 words).${summaryContext}${knowledgeContext}
+[DICE ROLL: ${diceRoll}] Current Behavior Mode: ${currentBehavior}
+
 Rules:
 1. Speak as ${this.settings.ai.name}. Be brief (max 2 sentences).
 2. React to the user's current status and the trigger context.
-3. Blend the "Primary Behavioral Trait" with the "Personality Guidelines" below.
+3. ADOPT THE MOOD of the Dice Roll result strictly.
 4. Output ONLY the speech of the character.
+5. IMPORTANT: At the very end of your response, you MUST provide a extremely brief summary of ONLY this specific interaction (trigger + your response), formatted as [[SUMMARY: your summary]]. Max 10 words. This will be hidden from the user.
+6. Optional Memory: If you learn something PERMANENT and IMPORTANT about the user (e.g., name, age), include it as *key: value* in your speech.
 
 Personality Guidelines based on Stats:
 1. If "Strength" (STR) is high (Level 5+), be confident, bold, and energetic.
@@ -396,7 +407,10 @@ Personality Guidelines based on Stats:
 5. If Satiety is low, act hungry or weak regardless of other stats.
 `;
 
-        // 2. Build Current User Prompt (Status + Trigger)
+        // 3. Build Current User Prompt (Status + Trigger + Goals)
+        const activeGoals = this.settings.goals.filter(g => !g.isCompleted);
+        const goalsText = activeGoals.map(g => `- ${g.title}: ${g.description} (Deadline: ${g.deadline})`).join('\n') || "No active goals.";
+
         const statsInfo = this.settings.stats.map(s => {
             const { level, progress } = calculateLevel(s.currentXp, s.baseXp, s.xpIncrement);
             return `- ${s.name} (${s.id}): Level ${level} (${Math.floor(progress)}%)`;
@@ -409,28 +423,45 @@ Current Status:
 - Current Rank: ${title.name}
 - Total Coins: ${this.settings.coins}
 - Trigger: ${triggerPrompt}
-- Current Mood Trait: ${currentBehavior}
+- Current Behavior Roll: ${diceRoll} (${currentBehavior})
+
+Active Goals:
+${goalsText}
 
 Current Player Stats:
 ${statsInfo}
 `;
 
         // 3. Generate Response using history
-        const response = await AIService.generateResponse(
+        const history = this.settings.ai.chatHistory || [];
+        // Map history to use summaries where available to save tokens
+        const summaryHistory = history.map(m => ({
+            role: m.role,
+            content: m.summary || m.content
+        }));
+        const prunedHistory = summaryHistory.slice(-6); 
+
+        const responseRaw = await AIService.generateResponse(
             this.settings, 
             systemPrompt, 
-            this.settings.ai.chatHistory || [], 
+            prunedHistory, 
             userPrompt,
-            100
+            120
         );
 
-        // 4. Update History
-        if (!this.settings.ai.chatHistory) this.settings.ai.chatHistory = [];
+        const { text: responseAfterSummary, summary } = this.extractSummary(responseRaw);
+        const { text: response, knowledge } = this.extractKnowledge(responseAfterSummary);
         
-        // Add the interaction to history (we summarize the user prompt to save tokens/space)
+        if (summary) this.settings.ai.chatSummary = summary;
+        if (knowledge) {
+            if (!this.settings.ai.userKnowledge) this.settings.ai.userKnowledge = {};
+            this.settings.ai.userKnowledge = { ...this.settings.ai.userKnowledge, ...knowledge };
+        }
+
+        // Add the interaction to history
         const historyEntry = `Action: ${triggerPrompt} (Satiety: ${Math.floor(this.settings.hunger)})`;
         this.settings.ai.chatHistory.push({ role: 'user', content: historyEntry });
-        this.settings.ai.chatHistory.push({ role: 'assistant', content: response });
+        this.settings.ai.chatHistory.push({ role: 'assistant', content: response, summary: summary || undefined });
 
         // Prune history
         const maxLen = this.settings.ai.maxHistoryLength || 10;
@@ -443,6 +474,144 @@ ${statsInfo}
         this.settings.ai.newResponse = true;
         this.settings.lastAiTriggerTime = Date.now();
         this.saveSettings();
+    }
+
+    async chatWithAi(userMessage: string) {
+        if (!this.settings.ai.enabled || !this.settings.ai.apiKey) return;
+
+        const totalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
+        const title = getCurrentTitle(totalXp, this.settings.titles);
+
+        // 1. Roll the Dice
+        const diceRoll = Math.floor(Math.random() * 6) + 1;
+        const currentBehavior = this.DICE_BEHAVIORS[diceRoll];
+
+        let summaryContext = "";
+        if (this.settings.ai.chatSummary) {
+            summaryContext = `\nConversation Summary: ${this.settings.ai.chatSummary}\n`;
+        }
+
+        let knowledgeContext = "";
+        if (this.settings.ai.userKnowledge && Object.keys(this.settings.ai.userKnowledge).length > 0) {
+            knowledgeContext = `\nUser Knowledge (Long-term Memory):\n${Object.entries(this.settings.ai.userKnowledge).map(([k, v]) => `- ${k}: ${v}`).join('\n')}\n`;
+        }
+
+        // 2. Build System Prompt
+        const systemPrompt = `
+You are ${this.settings.ai.name}, a helpful and cheeky companion. Speak as ${this.settings.ai.name}.${summaryContext}${knowledgeContext}
+[DICE ROLL: ${diceRoll}] Current Behavior Mode: ${currentBehavior}
+
+React to the user's message and their current status.
+ADOPT THE MOOD of the Dice Roll result strictly.
+Output ONLY the speech of the character.
+IMPORTANT: At the very end of your response, you MUST provide a extremely brief summary of ONLY this specific interaction (user message + your response), formatted as [[SUMMARY: your summary]]. Max 10 words. This will be hidden from the user.
+Optional Memory: If you learn something PERMANENT and IMPORTANT about the user (e.g., name, age), include it as *key: value* in your speech.
+
+Personality Guidelines based on Stats:
+1. If "Strength" (STR) is high (Level 5+), be confident, bold, and energetic.
+2. If "Knowledge/Intelligence" (INT) is low (Level 1-2), be slightly confused, silly.
+3. If "Vitality" (VIT) is high, be overly healthy and enthusiastic.
+4. If "Dexterity" (DEX) is low, mention being clumsy.
+5. If Satiety is low, act hungry or weak regardless of other stats.
+`;
+
+        // 2. Build Context Prompt
+
+        // 3. Build Context Prompt (Status + Goals)
+        const activeGoals = this.settings.goals.filter(g => !g.isCompleted);
+        const goalsText = activeGoals.map(g => `- ${g.title}: ${g.description} (Deadline: ${g.deadline})`).join('\n') || "No active goals.";
+
+        const statsInfo = this.settings.stats.map(s => {
+            const { level, progress } = calculateLevel(s.currentXp, s.baseXp, s.xpIncrement);
+            return `- ${s.name} (${s.id}): Level ${level} (${Math.floor(progress)}%)`;
+        }).join('\n');
+
+        const context = `
+[CONTEXT]
+Satiety: ${Math.floor(this.settings.hunger)}/${this.settings.maxHunger}
+Rank: ${title.name}
+Coins: ${this.settings.coins}
+Current Behavior Roll: ${diceRoll} (${currentBehavior})
+
+Active Goals:
+${goalsText}
+
+Stats:
+${statsInfo}
+`;
+
+        // 3. Update History with raw user message
+        if (!this.settings.ai.chatHistory) this.settings.ai.chatHistory = [];
+        this.settings.ai.chatHistory.push({ role: 'user', content: userMessage });
+
+        // 4. Generate Response
+        const history = this.settings.ai.chatHistory || [];
+        // Map history to use summaries where available
+        const summaryHistory = history.map(m => ({
+            role: m.role,
+            content: m.summary || m.content
+        }));
+        const prunedHistory = summaryHistory.slice(-8); // Last 4 interactions
+
+        const responseRaw = await AIService.generateResponse(
+            this.settings, 
+            systemPrompt, 
+            prunedHistory, 
+            context, // We pass context as the "current prompt" to give AI the latest status
+            350 // Allow for longer responses in direct chat
+        );
+
+        const { text: responseAfterSummary, summary } = this.extractSummary(responseRaw);
+        const { text: response, knowledge } = this.extractKnowledge(responseAfterSummary);
+
+        if (summary) this.settings.ai.chatSummary = summary;
+        if (knowledge) {
+            if (!this.settings.ai.userKnowledge) this.settings.ai.userKnowledge = {};
+            this.settings.ai.userKnowledge = { ...this.settings.ai.userKnowledge, ...knowledge };
+        }
+
+        // 5. Add AI response to history
+        this.settings.ai.chatHistory.push({ role: 'assistant', content: response, summary: summary || undefined });
+
+        // Prune history
+        const maxLen = this.settings.ai.maxHistoryLength || 10;
+        if (this.settings.ai.chatHistory.length > maxLen * 2) {
+            this.settings.ai.chatHistory = this.settings.ai.chatHistory.slice(-maxLen * 2);
+        }
+
+        // 6. Save state
+        this.settings.lastAiResponse = response;
+        this.settings.ai.newResponse = true;
+        this.saveSettings();
+    }
+
+    extractSummary(response: string): { text: string, summary: string | null } {
+        const regex = /\[\[SUMMARY:\s*(.*?)\s*\]\]/i;
+        const match = response.match(regex);
+        if (match) {
+            return {
+                text: response.replace(match[0], '').trim(),
+                summary: match[1].trim()
+            };
+        }
+        return { text: response, summary: null };
+    }
+
+    extractKnowledge(response: string): { text: string, knowledge: { [key: string]: string } | null } {
+        const regex = /\*(.*?):\s*(.*?)\*/g;
+        let match;
+        const knowledge: { [key: string]: string } = {};
+        let cleanText = response;
+
+        while ((match = regex.exec(response)) !== null) {
+            knowledge[match[1].trim()] = match[2].trim();
+            cleanText = cleanText.replace(match[0], '').trim();
+        }
+
+        return { 
+            text: cleanText, 
+            knowledge: Object.keys(knowledge).length > 0 ? knowledge : null 
+        };
     }
 
     async loadSettings() {

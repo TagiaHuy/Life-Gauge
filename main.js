@@ -130,7 +130,9 @@ var DEFAULT_SETTINGS = {
     model: "gemini-pro",
     newResponse: false,
     chatHistory: [],
-    maxHistoryLength: 10
+    maxHistoryLength: 10,
+    chatSummary: "",
+    userKnowledge: {}
   },
   lastAiResponse: "Hello! I am your companion. Keep me full and be productive!",
   lastAiTriggerTime: Date.now(),
@@ -299,7 +301,15 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     __publicField(this, "tasks", []);
     __publicField(this, "isUpdating", false);
     __publicField(this, "activeTab", "main");
+    __publicField(this, "renderedTab", null);
     __publicField(this, "expandedGoalId", null);
+    // UI Element References for Partial Updates
+    __publicField(this, "coinTextEl");
+    __publicField(this, "satietyBarEl");
+    __publicField(this, "satietyValueEl");
+    __publicField(this, "aiDescEl");
+    __publicField(this, "aiNameEl");
+    __publicField(this, "chatHistoryEl");
     __publicField(this, "purchasedItemIds", /* @__PURE__ */ new Set());
     this.plugin = plugin;
   }
@@ -321,31 +331,86 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     this.isUpdating = true;
     try {
       await this.loadTasks();
-      const visibleTasks = this.tasks.filter((t) => !t.isArchived);
-      const totalXp = getTotalXp(this.plugin.settings.stats);
-      const title = getCurrentTitle(totalXp, this.plugin.settings.titles);
-      const nextTitle = getNextTitle(totalXp, this.plugin.settings.titles);
       const { contentEl } = this;
-      contentEl.empty();
-      contentEl.addClass("life-gauge-dashboard");
-      this.renderHeader(contentEl, title, nextTitle, totalXp);
-      if (this.activeTab === "shop") {
-        this.renderShop(contentEl);
-      } else if (this.activeTab === "stats") {
-        this.renderStatsTab(contentEl);
-      } else if (this.activeTab === "goals") {
-        this.renderGoalsTab(contentEl);
-      } else {
-        this.renderStats(contentEl);
-        if (this.plugin.settings.skills.length > 0) {
-          this.renderSkills(contentEl);
+      if (this.renderedTab !== this.activeTab || contentEl.childElementCount === 0) {
+        contentEl.empty();
+        contentEl.addClass("life-gauge-dashboard");
+        this.renderedTab = this.activeTab;
+        const totalXp = getTotalXp(this.plugin.settings.stats);
+        const title = getCurrentTitle(totalXp, this.plugin.settings.titles);
+        const nextTitle = getNextTitle(totalXp, this.plugin.settings.titles);
+        this.renderHeader(contentEl, title, nextTitle, totalXp);
+        if (this.activeTab === "shop") {
+          this.renderShop(contentEl);
+        } else if (this.activeTab === "stats") {
+          this.renderStatsTab(contentEl);
+        } else if (this.activeTab === "goals") {
+          this.renderGoalsTab(contentEl);
+        } else if (this.activeTab === "chat") {
+          this.renderChatTab(contentEl);
+        } else {
+          const visibleTasks = this.tasks.filter((t) => !t.isArchived);
+          this.renderStats(contentEl);
+          if (this.plugin.settings.skills.length > 0) {
+            this.renderSkills(contentEl);
+          }
+          this.renderQuests(contentEl, visibleTasks);
         }
-        this.renderQuests(contentEl, visibleTasks);
+      } else {
+        this.updateDynamicContent();
+        if (this.activeTab === "main") {
+          const header = contentEl.querySelector(".lg-header");
+          if (header) {
+            let next = header.nextElementSibling;
+            while (next) {
+              const toRemove = next;
+              next = next.nextElementSibling;
+              toRemove.remove();
+            }
+            const visibleTasks = this.tasks.filter((t) => !t.isArchived);
+            this.renderStats(contentEl);
+            if (this.plugin.settings.skills.length > 0) {
+              this.renderSkills(contentEl);
+            }
+            this.renderQuests(contentEl, visibleTasks);
+          }
+        } else if (this.activeTab === "chat") {
+          this.refreshChatHistory();
+        }
       }
     } catch (e) {
       console.error("Life Gauge: Update failed", e);
     } finally {
       this.isUpdating = false;
+    }
+  }
+  updateDynamicContent() {
+    const totalXp = getTotalXp(this.plugin.settings.stats);
+    const title = getCurrentTitle(totalXp, this.plugin.settings.titles);
+    if (this.coinTextEl) {
+      this.coinTextEl.textContent = `\u{1F4B0} ${Math.floor(this.plugin.settings.coins)}`;
+    }
+    if (this.satietyBarEl && this.satietyValueEl) {
+      const hunger = this.plugin.settings.hunger;
+      const maxHunger = this.plugin.settings.maxHunger;
+      const percent = hunger / maxHunger * 100;
+      this.satietyBarEl.style.width = `${Math.min(100, percent)}%`;
+      if (percent >= 70)
+        this.satietyBarEl.style.backgroundColor = "#4dff88";
+      else if (percent >= 30)
+        this.satietyBarEl.style.backgroundColor = "#ffcc00";
+      else
+        this.satietyBarEl.style.backgroundColor = "#ff4d4d";
+      this.satietyValueEl.textContent = `${Math.floor(hunger)} / ${maxHunger}`;
+    }
+    if (this.aiNameEl && this.aiDescEl) {
+      if (this.plugin.settings.ai.enabled) {
+        this.aiNameEl.textContent = this.plugin.settings.ai.name.toUpperCase();
+        this.aiDescEl.textContent = this.plugin.settings.lastAiResponse;
+      } else {
+        this.aiNameEl.textContent = `${title.icon} ${title.name.toUpperCase()} ${title.icon}`;
+        this.aiDescEl.textContent = title.description;
+      }
     }
   }
   async loadTasks() {
@@ -363,27 +428,30 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     this.renderSatiety(topBar);
     const coinsSettingsGroup = topBar.createEl("div", { cls: "lg-coins-shop-group" });
     const coinContainer = coinsSettingsGroup.createEl("div", { cls: "lg-coin-container" });
-    coinContainer.createEl("span", { text: `\u{1F4B0} ${Math.floor(this.plugin.settings.coins)}`, cls: "lg-coin-text" });
+    this.coinTextEl = coinContainer.createEl("span", { text: `\u{1F4B0} ${Math.floor(this.plugin.settings.coins)}`, cls: "lg-coin-text" });
     const settingsIcon = coinsSettingsGroup.createEl("div", { cls: "lg-settings-icon", text: "\u2699\uFE0F" });
     settingsIcon.addEventListener("click", () => {
       this.app.setting.open();
       this.app.setting.openTabById(this.plugin.manifest.id);
     });
     const tabNav = header.createEl("div", { cls: "lg-tab-nav" });
+    const dropdown = tabNav.createEl("select", { cls: "lg-tab-dropdown" });
     const tabs = [
       { id: "main", name: "Dashboard", icon: "\u{1F3E0}" },
       { id: "shop", name: "Shop", icon: "\u{1F3EA}" },
       { id: "stats", name: "Stats", icon: "\u{1F4CA}" },
-      { id: "goals", name: "Goals", icon: "\u{1F3AF}" }
+      { id: "goals", name: "Goals", icon: "\u{1F3AF}" },
+      { id: "chat", name: `Chat with ${this.plugin.settings.ai.name}`, icon: "\u{1F4AC}" }
     ];
     tabs.forEach((t) => {
-      const tabBtn = tabNav.createEl("button", { cls: `lg-tab-btn ${this.activeTab === t.id ? "is-active" : ""}` });
-      tabBtn.createEl("span", { text: t.icon, cls: "lg-tab-icon" });
-      tabBtn.createEl("span", { text: t.name, cls: "lg-tab-name" });
-      tabBtn.addEventListener("click", () => {
-        this.activeTab = t.id;
-        this.update();
-      });
+      const option = dropdown.createEl("option", { value: t.id, text: `${t.icon} ${t.name}` });
+      if (this.activeTab === t.id) {
+        option.selected = true;
+      }
+    });
+    dropdown.addEventListener("change", () => {
+      this.activeTab = dropdown.value;
+      this.update();
     });
     const mainInfo = header.createEl("div", { cls: "lg-header-main" });
     const avatarContainer = mainInfo.createEl("div", { cls: "lg-avatar-container" });
@@ -409,14 +477,12 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       displayName = this.plugin.settings.ai.name.toUpperCase();
       displayDesc = this.plugin.settings.lastAiResponse;
     }
-    info.createEl("div", { cls: "lg-nickname", text: displayName });
-    const descEl = info.createEl("div", { cls: "lg-description" });
+    this.aiNameEl = info.createEl("div", { cls: "lg-nickname", text: displayName });
+    this.aiDescEl = info.createEl("div", { cls: "lg-description" });
+    this.aiDescEl.textContent = displayDesc;
     if (this.plugin.settings.ai.enabled && this.plugin.settings.ai.newResponse) {
-      this.runTypewriter(descEl, displayDesc);
       this.plugin.settings.ai.newResponse = false;
       this.plugin.saveSettings();
-    } else {
-      descEl.textContent = displayDesc;
     }
     if (this.plugin.settings.ai.enabled) {
       return;
@@ -428,13 +494,6 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
       info.createEl("div", { cls: "lg-next-rank", text: `\u{1F3C6} You have reached the pinnacle of glory!` });
     }
   }
-  async runTypewriter(el, text, speed = 25) {
-    el.textContent = "";
-    for (let i = 0; i < text.length; i++) {
-      el.textContent += text.charAt(i);
-      await new Promise((resolve) => setTimeout(resolve, speed));
-    }
-  }
   renderSatiety(parent) {
     const hunger = this.plugin.settings.hunger;
     const maxHunger = this.plugin.settings.maxHunger;
@@ -442,16 +501,16 @@ var LifeGaugeView = class extends import_obsidian.ItemView {
     const container = parent.createEl("div", { cls: "lg-satiety-container" });
     container.createEl("div", { text: "\u{1F356} Satiety", cls: "lg-satiety-label" });
     const barContainer = container.createEl("div", { cls: "lg-bar-container satiety" });
-    const bar = barContainer.createEl("div", { cls: "lg-bar-fill" });
-    bar.style.width = `${Math.min(100, percent)}%`;
+    this.satietyBarEl = barContainer.createEl("div", { cls: "lg-bar-fill" });
+    this.satietyBarEl.style.width = `${Math.min(100, percent)}%`;
     if (percent >= 70) {
-      bar.style.backgroundColor = "#4dff88";
+      this.satietyBarEl.style.backgroundColor = "#4dff88";
     } else if (percent >= 30) {
-      bar.style.backgroundColor = "#ffcc00";
+      this.satietyBarEl.style.backgroundColor = "#ffcc00";
     } else {
-      bar.style.backgroundColor = "#ff4d4d";
+      this.satietyBarEl.style.backgroundColor = "#ff4d4d";
     }
-    container.createEl("div", { text: `${Math.floor(hunger)} / ${maxHunger}`, cls: "lg-satiety-value" });
+    this.satietyValueEl = container.createEl("div", { text: `${Math.floor(hunger)} / ${maxHunger}`, cls: "lg-satiety-value" });
   }
   renderShop(parent) {
     const shopContainer = parent.createEl("div", { cls: "lg-shop-container" });
@@ -868,6 +927,60 @@ You have reached a new title: ${newTitle.name}!`, 5e3);
       this.plugin.isInternalChange = false;
     }
   }
+  renderChatTab(parent) {
+    const chatContainer = parent.createEl("div", { cls: "lg-chat-container" });
+    chatContainer.createEl("h3", { text: `\u{1F4AC} Chat with ${this.plugin.settings.ai.name}`, cls: "lg-section-title" });
+    this.chatHistoryEl = chatContainer.createEl("div", { cls: "lg-chat-history" });
+    this.refreshChatHistory();
+    const inputContainer = chatContainer.createEl("div", { cls: "lg-chat-input-container" });
+    const input = inputContainer.createEl("input", {
+      type: "text",
+      placeholder: "Type your message...",
+      cls: "lg-chat-input"
+    });
+    const sendBtn = inputContainer.createEl("button", { text: "Send", cls: "lg-chat-send-btn" });
+    const handleSend = async () => {
+      const message = input.value.trim();
+      if (!message)
+        return;
+      input.value = "";
+      input.disabled = true;
+      sendBtn.disabled = true;
+      try {
+        if (this.chatHistoryEl) {
+          const userMsgEl = this.chatHistoryEl.createEl("div", { cls: "lg-chat-msg user" });
+          userMsgEl.createEl("div", { text: message, cls: "lg-chat-msg-content" });
+          this.chatHistoryEl.scrollTop = this.chatHistoryEl.scrollHeight;
+        }
+        await this.plugin.chatWithAi(message);
+        await this.update();
+      } finally {
+        input.disabled = false;
+        sendBtn.disabled = false;
+        input.focus();
+      }
+    };
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter")
+        handleSend();
+    });
+    sendBtn.addEventListener("click", handleSend);
+  }
+  refreshChatHistory() {
+    if (!this.chatHistoryEl)
+      return;
+    this.chatHistoryEl.empty();
+    const history = this.plugin.settings.ai.chatHistory || [];
+    history.forEach((msg) => {
+      const msgEl = this.chatHistoryEl.createEl("div", { cls: `lg-chat-msg ${msg.role}` });
+      msgEl.createEl("div", { text: msg.content, cls: "lg-chat-msg-content" });
+    });
+    setTimeout(() => {
+      if (this.chatHistoryEl) {
+        this.chatHistoryEl.scrollTop = this.chatHistoryEl.scrollHeight;
+      }
+    }, 100);
+  }
 };
 
 // src/ai.ts
@@ -983,18 +1096,14 @@ var LifeGaugePlugin = class extends import_obsidian3.Plugin {
     __publicField(this, "isSyncing", false);
     __publicField(this, "pendingSync", false);
     __publicField(this, "lastKnownContent", "");
-    __publicField(this, "AI_BEHAVIORS", [
-      "Review: Thorough analysis of my productivity.",
-      "Compare: Compare me to yesterday or goals.",
-      "Complain: Complain about me neglecting my duties or letting the food run out.",
-      "Sadness: Feeling disappointed if I underperform.",
-      "Encouragement: Inspire and motivate strongly.",
-      "Crazy: Humorously teasing about my habits.",
-      "Anxious: Shows anxiety if I have a lot of overdue tasks.",
-      "Excited: Shout with excitement when I achieve new achievements.",
-      "Philosophy: Deep reflections on discipline and life.",
-      "Curious: Ask about what I'm working on."
-    ]);
+    __publicField(this, "DICE_BEHAVIORS", {
+      1: "Focus on User: Ask about their day, feelings, or recent life events.",
+      2: "Storyteller/Creative: Tell a very short story, a joke, a fun fact, or something imaginative.",
+      3: "Cheeky/Sarcastic: Use friendly sarcasm, tease the user about their stats or hunger.",
+      4: "Goal-Oriented: Actively discuss their long-term goals or suggest a new challenge.",
+      5: "Philosophical: Share a deep reflection or ask a thought-provoking question about discipline.",
+      6: "Empathetic: Check-in on the user's mental well-being and offer supportive words."
+    });
   }
   async onload() {
     await this.loadSettings();
@@ -1284,15 +1393,32 @@ You have reached a new title: ${newTitle.name}!`, 5e3);
       return;
     const totalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
     const title = getCurrentTitle(totalXp, this.settings.titles);
-    const behaviorIdx = Math.floor(Math.random() * this.AI_BEHAVIORS.length);
-    const currentBehavior = this.AI_BEHAVIORS[behaviorIdx];
+    const diceRoll = Math.floor(Math.random() * 6) + 1;
+    const currentBehavior = this.DICE_BEHAVIORS[diceRoll];
+    let summaryContext = "";
+    if (this.settings.ai.chatSummary) {
+      summaryContext = `
+Conversation Summary: ${this.settings.ai.chatSummary}
+`;
+    }
+    let knowledgeContext = "";
+    if (this.settings.ai.userKnowledge && Object.keys(this.settings.ai.userKnowledge).length > 0) {
+      knowledgeContext = `
+User Knowledge (Long-term Memory):
+${Object.entries(this.settings.ai.userKnowledge).map(([k, v]) => `- ${k}: ${v}`).join("\n")}
+`;
+    }
     const systemPrompt = `
-You are ${this.settings.ai.name}, a helpful and cheeky companion. Keep your response EXTREMELY SHORT (1-2 sentences, max 20 words).
+You are ${this.settings.ai.name}, a helpful and cheeky companion. Keep your response EXTREMELY SHORT (1-2 sentences, max 20 words).${summaryContext}${knowledgeContext}
+[DICE ROLL: ${diceRoll}] Current Behavior Mode: ${currentBehavior}
+
 Rules:
 1. Speak as ${this.settings.ai.name}. Be brief (max 2 sentences).
 2. React to the user's current status and the trigger context.
-3. Blend the "Primary Behavioral Trait" with the "Personality Guidelines" below.
+3. ADOPT THE MOOD of the Dice Roll result strictly.
 4. Output ONLY the speech of the character.
+5. IMPORTANT: At the very end of your response, you MUST provide a extremely brief summary of ONLY this specific interaction (trigger + your response), formatted as [[SUMMARY: your summary]]. Max 10 words. This will be hidden from the user.
+6. Optional Memory: If you learn something PERMANENT and IMPORTANT about the user (e.g., name, age), include it as *key: value* in your speech.
 
 Personality Guidelines based on Stats:
 1. If "Strength" (STR) is high (Level 5+), be confident, bold, and energetic.
@@ -1301,6 +1427,8 @@ Personality Guidelines based on Stats:
 4. If "Dexterity" (DEX) is low, mention being clumsy.
 5. If Satiety is low, act hungry or weak regardless of other stats.
 `;
+    const activeGoals = this.settings.goals.filter((g) => !g.isCompleted);
+    const goalsText = activeGoals.map((g) => `- ${g.title}: ${g.description} (Deadline: ${g.deadline})`).join("\n") || "No active goals.";
     const statsInfo = this.settings.stats.map((s) => {
       const { level, progress } = calculateLevel(s.currentXp, s.baseXp, s.xpIncrement);
       return `- ${s.name} (${s.id}): Level ${level} (${Math.floor(progress)}%)`;
@@ -1312,23 +1440,39 @@ Current Status:
 - Current Rank: ${title.name}
 - Total Coins: ${this.settings.coins}
 - Trigger: ${triggerPrompt}
-- Current Mood Trait: ${currentBehavior}
+- Current Behavior Roll: ${diceRoll} (${currentBehavior})
+
+Active Goals:
+${goalsText}
 
 Current Player Stats:
 ${statsInfo}
 `;
-    const response = await AIService.generateResponse(
+    const history = this.settings.ai.chatHistory || [];
+    const summaryHistory = history.map((m) => ({
+      role: m.role,
+      content: m.summary || m.content
+    }));
+    const prunedHistory = summaryHistory.slice(-6);
+    const responseRaw = await AIService.generateResponse(
       this.settings,
       systemPrompt,
-      this.settings.ai.chatHistory || [],
+      prunedHistory,
       userPrompt,
-      100
+      120
     );
-    if (!this.settings.ai.chatHistory)
-      this.settings.ai.chatHistory = [];
+    const { text: responseAfterSummary, summary } = this.extractSummary(responseRaw);
+    const { text: response, knowledge } = this.extractKnowledge(responseAfterSummary);
+    if (summary)
+      this.settings.ai.chatSummary = summary;
+    if (knowledge) {
+      if (!this.settings.ai.userKnowledge)
+        this.settings.ai.userKnowledge = {};
+      this.settings.ai.userKnowledge = { ...this.settings.ai.userKnowledge, ...knowledge };
+    }
     const historyEntry = `Action: ${triggerPrompt} (Satiety: ${Math.floor(this.settings.hunger)})`;
     this.settings.ai.chatHistory.push({ role: "user", content: historyEntry });
-    this.settings.ai.chatHistory.push({ role: "assistant", content: response });
+    this.settings.ai.chatHistory.push({ role: "assistant", content: response, summary: summary || void 0 });
     const maxLen = this.settings.ai.maxHistoryLength || 10;
     if (this.settings.ai.chatHistory.length > maxLen * 2) {
       this.settings.ai.chatHistory = this.settings.ai.chatHistory.slice(-maxLen * 2);
@@ -1337,6 +1481,123 @@ ${statsInfo}
     this.settings.ai.newResponse = true;
     this.settings.lastAiTriggerTime = Date.now();
     this.saveSettings();
+  }
+  async chatWithAi(userMessage) {
+    if (!this.settings.ai.enabled || !this.settings.ai.apiKey)
+      return;
+    const totalXp = this.settings.stats.reduce((acc, s) => acc + s.currentXp, 0);
+    const title = getCurrentTitle(totalXp, this.settings.titles);
+    const diceRoll = Math.floor(Math.random() * 6) + 1;
+    const currentBehavior = this.DICE_BEHAVIORS[diceRoll];
+    let summaryContext = "";
+    if (this.settings.ai.chatSummary) {
+      summaryContext = `
+Conversation Summary: ${this.settings.ai.chatSummary}
+`;
+    }
+    let knowledgeContext = "";
+    if (this.settings.ai.userKnowledge && Object.keys(this.settings.ai.userKnowledge).length > 0) {
+      knowledgeContext = `
+User Knowledge (Long-term Memory):
+${Object.entries(this.settings.ai.userKnowledge).map(([k, v]) => `- ${k}: ${v}`).join("\n")}
+`;
+    }
+    const systemPrompt = `
+You are ${this.settings.ai.name}, a helpful and cheeky companion. Speak as ${this.settings.ai.name}.${summaryContext}${knowledgeContext}
+[DICE ROLL: ${diceRoll}] Current Behavior Mode: ${currentBehavior}
+
+React to the user's message and their current status.
+ADOPT THE MOOD of the Dice Roll result strictly.
+Output ONLY the speech of the character.
+IMPORTANT: At the very end of your response, you MUST provide a extremely brief summary of ONLY this specific interaction (user message + your response), formatted as [[SUMMARY: your summary]]. Max 10 words. This will be hidden from the user.
+Optional Memory: If you learn something PERMANENT and IMPORTANT about the user (e.g., name, age), include it as *key: value* in your speech.
+
+Personality Guidelines based on Stats:
+1. If "Strength" (STR) is high (Level 5+), be confident, bold, and energetic.
+2. If "Knowledge/Intelligence" (INT) is low (Level 1-2), be slightly confused, silly.
+3. If "Vitality" (VIT) is high, be overly healthy and enthusiastic.
+4. If "Dexterity" (DEX) is low, mention being clumsy.
+5. If Satiety is low, act hungry or weak regardless of other stats.
+`;
+    const activeGoals = this.settings.goals.filter((g) => !g.isCompleted);
+    const goalsText = activeGoals.map((g) => `- ${g.title}: ${g.description} (Deadline: ${g.deadline})`).join("\n") || "No active goals.";
+    const statsInfo = this.settings.stats.map((s) => {
+      const { level, progress } = calculateLevel(s.currentXp, s.baseXp, s.xpIncrement);
+      return `- ${s.name} (${s.id}): Level ${level} (${Math.floor(progress)}%)`;
+    }).join("\n");
+    const context = `
+[CONTEXT]
+Satiety: ${Math.floor(this.settings.hunger)}/${this.settings.maxHunger}
+Rank: ${title.name}
+Coins: ${this.settings.coins}
+Current Behavior Roll: ${diceRoll} (${currentBehavior})
+
+Active Goals:
+${goalsText}
+
+Stats:
+${statsInfo}
+`;
+    if (!this.settings.ai.chatHistory)
+      this.settings.ai.chatHistory = [];
+    this.settings.ai.chatHistory.push({ role: "user", content: userMessage });
+    const history = this.settings.ai.chatHistory || [];
+    const summaryHistory = history.map((m) => ({
+      role: m.role,
+      content: m.summary || m.content
+    }));
+    const prunedHistory = summaryHistory.slice(-8);
+    const responseRaw = await AIService.generateResponse(
+      this.settings,
+      systemPrompt,
+      prunedHistory,
+      context,
+      // We pass context as the "current prompt" to give AI the latest status
+      350
+      // Allow for longer responses in direct chat
+    );
+    const { text: responseAfterSummary, summary } = this.extractSummary(responseRaw);
+    const { text: response, knowledge } = this.extractKnowledge(responseAfterSummary);
+    if (summary)
+      this.settings.ai.chatSummary = summary;
+    if (knowledge) {
+      if (!this.settings.ai.userKnowledge)
+        this.settings.ai.userKnowledge = {};
+      this.settings.ai.userKnowledge = { ...this.settings.ai.userKnowledge, ...knowledge };
+    }
+    this.settings.ai.chatHistory.push({ role: "assistant", content: response, summary: summary || void 0 });
+    const maxLen = this.settings.ai.maxHistoryLength || 10;
+    if (this.settings.ai.chatHistory.length > maxLen * 2) {
+      this.settings.ai.chatHistory = this.settings.ai.chatHistory.slice(-maxLen * 2);
+    }
+    this.settings.lastAiResponse = response;
+    this.settings.ai.newResponse = true;
+    this.saveSettings();
+  }
+  extractSummary(response) {
+    const regex = /\[\[SUMMARY:\s*(.*?)\s*\]\]/i;
+    const match = response.match(regex);
+    if (match) {
+      return {
+        text: response.replace(match[0], "").trim(),
+        summary: match[1].trim()
+      };
+    }
+    return { text: response, summary: null };
+  }
+  extractKnowledge(response) {
+    const regex = /\*(.*?):\s*(.*?)\*/g;
+    let match;
+    const knowledge = {};
+    let cleanText = response;
+    while ((match = regex.exec(response)) !== null) {
+      knowledge[match[1].trim()] = match[2].trim();
+      cleanText = cleanText.replace(match[0], "").trim();
+    }
+    return {
+      text: cleanText,
+      knowledge: Object.keys(knowledge).length > 0 ? knowledge : null
+    };
   }
   async loadSettings() {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
